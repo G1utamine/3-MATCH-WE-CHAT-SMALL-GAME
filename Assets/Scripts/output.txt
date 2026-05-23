@@ -1,0 +1,4279 @@
+Project Path: Scripts
+
+Source Tree:
+
+```txt
+Scripts
+├── Core
+│   ├── CoordinateConverter.cs
+│   ├── CoordinateConverter.cs.meta
+│   ├── GameFlowController.cs
+│   ├── GameFlowController.cs.meta
+│   ├── GameObjectPool.cs
+│   ├── GameObjectPool.cs.meta
+│   ├── TileClearEffect.cs
+│   ├── TileClearEffect.cs.meta
+│   ├── TileView.cs
+│   └── TileView.cs.meta
+├── Core.meta
+├── Data
+│   ├── DataManager.cs
+│   ├── DataManager.cs.meta
+│   ├── EffectManager.cs
+│   ├── EffectManager.cs.meta
+│   ├── LevelConfig.cs
+│   ├── LevelConfig.cs.meta
+│   ├── TileData.cs
+│   └── TileData.cs.meta
+├── Data.meta
+├── GameManager.cs
+├── GameManager.cs.meta
+├── Systems
+│   ├── AudioManager.cs
+│   ├── AudioManager.cs.meta
+│   ├── BoardView.cs
+│   ├── BoardView.cs.meta
+│   ├── CascadeSystem.cs
+│   ├── CascadeSystem.cs.meta
+│   ├── ClearSystem.cs
+│   ├── ClearSystem.cs.meta
+│   ├── DeadlockChecker.cs
+│   ├── DeadlockChecker.cs.meta
+│   ├── DropSystem.cs
+│   ├── DropSystem.cs.meta
+│   ├── GridSystem.cs
+│   ├── GridSystem.cs.meta
+│   ├── InputController.cs
+│   ├── InputController.cs.meta
+│   ├── ItemManager.cs
+│   ├── ItemManager.cs.meta
+│   ├── LevelSystem.cs
+│   ├── LevelSystem.cs.meta
+│   ├── MatchChecker.cs
+│   ├── MatchChecker.cs.meta
+│   ├── ScoreSystem.cs
+│   ├── ScoreSystem.cs.meta
+│   ├── SpawnSystem.cs
+│   ├── SpawnSystem.cs.meta
+│   ├── SwapSystem.cs
+│   └── SwapSystem.cs.meta
+├── Systems.meta
+├── UI
+│   ├── AdRewardPanel.cs
+│   ├── AdRewardPanel.cs.meta
+│   ├── HUDController.cs
+│   ├── HUDController.cs.meta
+│   ├── MenuController.cs
+│   └── MenuController.cs.meta
+├── UI.meta
+├── code2prompt.exe
+└── output.txt
+
+```
+
+`Core.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 3bae42600a51fee469b438b42b25880c
+folderAsset: yes
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Core\CoordinateConverter.cs`:
+
+```cs
+using UnityEngine;
+using Match3.Systems;
+
+namespace Match3.Core
+{
+    public static class CoordinateConverter
+    {
+        public static bool WorldToGrid(Vector3 worldPos, BoardView boardView, out int row, out int col)
+        {
+            return boardView.WorldToGrid(worldPos, out row, out col);
+        }
+
+        public static Vector3 GridToWorld(int row, int col, BoardView boardView)
+        {
+            return boardView.GridToWorld(row, col);
+        }
+
+        public static Vector2 WorldToUI(Vector3 worldPos, Canvas canvas, Camera uiCamera, RectTransform targetRect)
+        {
+            Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(uiCamera, worldPos);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(targetRect, screenPos, uiCamera, out Vector2 localPoint);
+            return localPoint;
+        }
+    }
+}
+```
+
+`Core\CoordinateConverter.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: bdb0e9cf341ee0942bb5d02492aae12c
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Core\GameFlowController.cs`:
+
+```cs
+using System;
+using UnityEngine;
+
+namespace Match3.Core
+{
+    public enum GameState
+    {
+        Idle,
+        Selecting,
+        Swapping,
+        Checking,
+        Clearing,
+        Dropping,
+        Spawning,
+        GameOver
+    }
+    public class GameFlowController : MonoBehaviour
+    {
+        public static GameFlowController Instance { get; private set; }
+
+        public GameState CurrentState { get; private set; } = GameState.Idle;
+
+        public event Action<GameState> OnStateChanged;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+        }
+
+        public void SetState(GameState newState)
+        {
+            if (CurrentState == newState) return;
+            CurrentState = newState;
+            OnStateChanged?.Invoke(newState);
+        }
+        public bool CanAcceptInput => CurrentState == GameState.Idle;
+        public bool IsGameOver => CurrentState == GameState.GameOver;
+    }
+}
+
+```
+
+`Core\GameFlowController.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: eaefb72fb00433544855eabd8b256d27
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Core\GameObjectPool.cs`:
+
+```cs
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Pool;
+
+namespace Match3.Core
+{
+    public class GameObjectPool<T> where T : Component
+    {
+        private static GameObjectPool<T> _instance;
+        public static GameObjectPool<T> Instance => _instance ??= new GameObjectPool<T>();
+
+        private readonly Dictionary<int, ObjectPool<T>> _pools = new Dictionary<int, ObjectPool<T>>();
+        private Transform _poolRoot;
+
+        private Transform GetPoolRoot()
+        {
+            if (_poolRoot == null)
+            {
+                var go = new GameObject($"[Pool_{typeof(T).Name}]");
+                Object.DontDestroyOnLoad(go);
+                _poolRoot = go.transform;
+            }
+            return _poolRoot;
+        }
+
+        /// <summary>
+        /// 从池子中获取一个对象（已修正每次复用强制设置 Parent 的 Bug）
+        /// </summary>
+        public T Get(T prefab, Transform parent = null)
+        {
+            if (prefab == null) return null;
+
+            int prefabId = prefab.gameObject.GetInstanceID();
+
+            if (!_pools.ContainsKey(prefabId))
+            {
+                _pools[prefabId] = new ObjectPool<T>(
+                    createFunc: () => Object.Instantiate(prefab),
+                    actionOnGet: (obj) => {
+                        if (obj != null) obj.gameObject.SetActive(true);
+                    },
+                    actionOnRelease: (obj) => {
+                        if (obj != null)
+                        {
+                            obj.gameObject.SetActive(false);
+                            obj.transform.SetParent(GetPoolRoot()); // 回收时放回池子根节点
+                        }
+                    },
+                    actionOnDestroy: (obj) => {
+                        if (obj != null) Object.Destroy(obj.gameObject);
+                    },
+                    collectionCheck: true,
+                    defaultCapacity: 20,
+                    maxSize: 100
+                );
+            }
+
+            // 1. 从专属池里拿出一个（可能是全新的，也可能是回收的旧物体）
+            T spawnedObj = _pools[prefabId].Get();
+
+            // 2. 🔥【核心修正】无论它是新生产的还是复用的，只要你传了 parent，就强行再设置一遍父物体！
+            if (parent != null)
+            {
+                // 第二个参数为 false，确保它在新的 UI 容器下能正确继承缩放和局部位移，不会乱飞
+                spawnedObj.transform.SetParent(parent, false);
+            }
+
+            return spawnedObj;
+        }
+
+        public void Release(T prefab, T obj)
+        {
+            if (prefab == null || obj == null) return;
+
+            int prefabId = prefab.gameObject.GetInstanceID();
+            if (_pools.TryGetValue(prefabId, out var pool))
+            {
+                pool.Release(obj);
+            }
+            else
+            {
+                Object.Destroy(obj.gameObject);
+            }
+        }
+
+        public void ClearAll()
+        {
+            foreach (var pool in _pools.Values) pool.Clear();
+            _pools.Clear();
+            if (_poolRoot != null) Object.Destroy(_poolRoot.gameObject);
+        }
+    }
+}
+```
+
+`Core\GameObjectPool.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 7fb1d16743aea994e96f2345202947a1
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Core\TileClearEffect.cs`:
+
+```cs
+using System.Collections;
+using DG.Tweening;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Match3.Core
+{
+    public class TileClearEffect : MonoBehaviour
+    {
+        [SerializeField] private int _fragmentCount = 8;
+        [SerializeField] private float _fragmentSize = 18f;
+        [SerializeField] private float _burstRadius = 60f;
+        [SerializeField] private float _burstDuration = 0.45f;
+        [SerializeField] private float _flashScale = 1.8f;
+        [SerializeField] private float _flashDuration = 0.25f;
+
+        private Image _flashImage;
+        private Image[] _fragments;
+        private bool _built;
+
+        private RectTransform _rectTransform;
+
+        // ── 构建 UI 子物体（只建一次）────────────────────────────────────
+        private void EnsureBuilt()
+        {
+            if (_built) return;
+            _built = true;
+
+            // 确保自身有 RectTransform
+            _rectTransform = GetComponent<RectTransform>();
+            if (_rectTransform == null) _rectTransform = gameObject.AddComponent<RectTransform>();
+
+            // 1. 闪光圆
+            var flashGO = new GameObject("Flash");
+            flashGO.transform.SetParent(transform, false);
+            _flashImage = flashGO.AddComponent<Image>();
+            _flashImage.sprite = GetCircleSpriteStatic();
+            _flashImage.raycastTarget = false;
+
+            // 2. 碎片
+            _fragments = new Image[_fragmentCount];
+            for (int i = 0; i < _fragmentCount; i++)
+            {
+                var go = new GameObject($"Frag_{i}");
+                go.transform.SetParent(transform, false);
+                var img = go.AddComponent<Image>();
+                img.sprite = GetSquareSprite();
+                img.raycastTarget = false;
+
+                var rt = go.GetComponent<RectTransform>();
+                rt.sizeDelta = new Vector2(_fragmentSize, _fragmentSize);
+                _fragments[i] = img;
+            }
+        }
+
+        // ── 对外接口 ─────────────────────────────────────────────────
+        public void Play(Vector3 worldPos, Color color, System.Action onComplete)
+        {
+            EnsureBuilt();
+
+            // 1. 强力清理所有旧动画，杜绝残留
+            DOTween.Kill(transform);
+            _flashImage.transform.DOKill(true);
+            _flashImage.DOKill(true);
+            foreach (var f in _fragments)
+            {
+                f.transform.DOKill(true);
+                f.DOKill(true);
+            }
+
+            // 2. 🔥【核心修正】彻底洗白自身的 UI 空间属性，防止二次复用时变形、缩水或飞走
+            _rectTransform.position = worldPos; // 设定世界坐标
+            _rectTransform.localScale = Vector3.one; // 👈 必须确保父节点缩放是 1
+            // 强行把局部 Z 轴归零，防止它飞到 UI 摄像机的剪裁平面后面
+            Vector3 localPos = _rectTransform.localPosition;
+            localPos.z = 0f;
+            _rectTransform.localPosition = localPos;
+
+            // 3. 强力洗白【闪光】的状态
+            _flashImage.gameObject.SetActive(true);
+            var rtFlash = _flashImage.GetComponent<RectTransform>();
+            rtFlash.localScale = Vector3.one * 0.3f;
+            rtFlash.localPosition = Vector3.zero; // 居中
+            rtFlash.sizeDelta = new Vector2(_burstRadius * 2, _burstRadius * 2);
+            _flashImage.color = new Color(color.r, color.g, color.b, 0.85f);
+
+            // 4. 强力洗白【碎片】的状态
+            for (int i = 0; i < _fragmentCount; i++)
+            {
+                var img = _fragments[i];
+                var rt = img.GetComponent<RectTransform>();
+
+                img.gameObject.SetActive(true);
+                rt.localPosition = Vector3.zero;         // 回归起点
+                rt.localScale = Vector3.one;             // 尺寸回弹
+                rt.localRotation = Quaternion.identity;  // 角度回正
+                rt.sizeDelta = new Vector2(_fragmentSize, _fragmentSize); // 确保长宽不为0
+                img.color = new Color(color.r, color.g, color.b, 1f);
+            }
+
+            StartCoroutine(PlayRoutine(color, onComplete));
+        }
+
+        private IEnumerator PlayRoutine(Color color, System.Action onComplete)
+        {
+            PlayFlash(color);
+            PlayFragments(color);
+
+            float total = Mathf.Max(_flashDuration, _burstDuration) + 0.05f;
+            yield return new WaitForSeconds(total);
+
+            // 🔥【新增优化】在彻底退场进池子前，把自身和子物体的所有 Tween 彻底抹杀
+            // 这样 DOTween 后台就不会在下一帧找不到目标而报 Safe Mode 警告了
+            DOTween.Kill(transform);
+            if (_flashImage != null) _flashImage.transform.DOKill();
+            if (_fragments != null)
+            {
+                foreach (var f in _fragments)
+                {
+                    if (f != null) f.transform.DOKill();
+                }
+            }
+
+            onComplete?.Invoke();
+        }
+
+        private void PlayFlash(Color color)
+        {
+            Color c1 = new Color(color.r, color.g, color.b, 0f);
+            var seq = DOTween.Sequence();
+            seq.Join(_flashImage.transform.DOScale(_flashScale, _flashDuration).SetEase(Ease.OutQuad));
+            seq.Join(_flashImage.DOColor(c1, _flashDuration).SetEase(Ease.InQuad));
+            seq.OnComplete(() => _flashImage.gameObject.SetActive(false));
+        }
+
+        private void PlayFragments(Color color)
+        {
+            float angleStep = 360f / _fragmentCount;
+
+            for (int i = 0; i < _fragmentCount; i++)
+            {
+                var img = _fragments[i];
+                var rt = img.GetComponent<RectTransform>();
+
+                float angle = angleStep * i + Random.Range(-10f, 10f);
+                float rad = angle * Mathf.Deg2Rad;
+
+                Vector3 localDir = new Vector3(Mathf.Cos(rad), Mathf.Sin(rad), 0f);
+                float dist = _burstRadius * Random.Range(0.7f, 1.3f);
+                Vector3 localDest = localDir * dist;
+
+                float spin = Random.Range(180f, 360f) * (Random.value > 0.5f ? 1 : -1);
+                float delay = Random.Range(0f, 0.04f);
+                Color fade = new Color(color.r, color.g, color.b, 0f);
+
+                var seq = DOTween.Sequence();
+                seq.AppendInterval(delay);
+                seq.Join(rt.DOLocalMove(localDest, _burstDuration).SetEase(Ease.OutCubic));
+                seq.Join(rt.DORotate(new Vector3(0, 0, spin), _burstDuration, RotateMode.FastBeyond360));
+                seq.Join(rt.DOScale(0f, _burstDuration * 0.8f).SetDelay(_burstDuration * 0.2f).SetEase(Ease.InQuad));
+                seq.Join(img.DOColor(fade, _burstDuration).SetEase(Ease.InQuad));
+                seq.OnComplete(() => img.gameObject.SetActive(false));
+            }
+        }
+
+        // ── Texture & Sprite 生成保持不变 ─────────────────────────────────
+        private static Sprite _circle;
+        private static Sprite _square;
+
+        // 把原来的 private static 改成 public static
+        public static Sprite GetCircleSpriteStatic()
+        {
+            if (_circle != null) return _circle;
+            int size = 64; float c = size / 2f, rad = c - 1f;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
+                    tex.SetPixel(x, y, new Color(1, 1, 1, Mathf.Clamp01(1f - (d - (rad - 2f)) / 2f)));
+                }
+            tex.Apply();
+            _circle = Sprite.Create(tex, new Rect(0, 0, size, size), Vector2.one * 0.5f, 100f);
+            return _circle;
+        }
+
+        private static Sprite GetSquareSprite()
+        {
+            if (_square != null) return _square;
+            var tex = new Texture2D(16, 16, TextureFormat.RGBA32, false);
+            for (int y = 0; y < 16; y++)
+                for (int x = 0; x < 16; x++)
+                    tex.SetPixel(x, y, Color.white);
+            tex.Apply();
+            _square = Sprite.Create(tex, new Rect(0, 0, 16, 16), Vector2.one * 0.5f, 100f);
+            return _square;
+        }
+    }
+}
+```
+
+`Core\TileClearEffect.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: deed6a1e0336804459ce4e5d4d25f8b5
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Core\TileView.cs`:
+
+```cs
+using DG.Tweening;
+using Match3.Data;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Match3.Core
+{
+    public class TileView : MonoBehaviour
+    {
+        public TileData Data { get; private set; }
+
+        [SerializeField] private Image _image;
+
+        private static readonly Color SelectedColor = new Color(1f, 1f, 0.4f, 1f);
+
+        public void Initialize(TileData data, Sprite sprite)
+        {
+            Data = data;
+            _image.sprite = sprite;
+            _image.color = Color.white;
+        }
+
+        public void SetSelected(bool selected)
+        {
+            _image.color = selected ? SelectedColor : Color.white;
+            if (selected)
+                transform.DOPunchScale(Vector3.one * 0.15f, 0.2f, 5, 0.5f);
+        }
+
+        public Tween MoveTo(RectTransform targetCell, float duration = 0.25f)
+        {
+            return transform.DOMove(targetCell.position, duration).SetEase(Ease.OutQuad);
+        }
+
+        public Tween PlayClearAnimation()
+        {
+            return transform.DOScale(Vector3.zero, 0.2f).SetEase(Ease.InBack);
+        }
+    }
+}
+```
+
+`Core\TileView.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 9bab9c4ed29b75146a497c5855acfeb8
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Data.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 07f78a19643706a48a376a4b535c4687
+folderAsset: yes
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Data\DataManager.cs`:
+
+```cs
+using UnityEngine;
+
+public class DataManager
+{
+    private static DataManager _instance;
+    public static DataManager Instance
+    {
+        get
+        {
+            if (_instance == null) _instance = new DataManager();
+            return _instance;
+        }
+    }
+
+    // 存档的 Key
+    private const string LEVEL_KEY = "CurrentLevel";
+    private const string BOMB_KEY = "Item_Bomb";
+    private const string LIGHTNING_KEY = "Item_Lightning";
+    private const string POTION_KEY = "Item_Potion";
+
+    // --- 关卡数据 ---
+    public int CurrentLevel
+    {
+        get => PlayerPrefs.GetInt(LEVEL_KEY, 1);
+        set => PlayerPrefs.SetInt(LEVEL_KEY, value);
+    }
+
+    // --- 道具数量数据 ---
+    // 🌟 核心改动：在后面的参数里填上 5。 
+    // 意思是：如果注册表里找不到这个 Key（新玩家），就默认返回 5；如果找得到（老玩家），就返回存下的数字。
+
+    public int BombCount
+    {
+        get => PlayerPrefs.GetInt("BombCount", 5); // 👈 默认值改为 5
+        set { PlayerPrefs.SetInt("BombCount", value);}
+    }
+
+    public int LightningCount
+    {
+        get => PlayerPrefs.GetInt("LightningCount", 5); // 👈 默认值改为 5
+        set { PlayerPrefs.SetInt("LightningCount", value);  }
+    }
+
+    public int PotionCount
+    {
+        get => PlayerPrefs.GetInt("PotionCount", 5); // 👈 默认值改为 5
+        set { PlayerPrefs.SetInt("PotionCount", value); }
+    }
+
+    // --- 核心方法 ---
+    public void StartNewGame()
+    {
+        // 1. 🌟 只重置关卡进度回第 1 关
+        CurrentLevel = 1;
+
+        // 2. ❌ 删掉或者注释掉重置道具数量的代码！
+        // BombCount = 3;       <-- 把这种代码删掉或注释掉
+        // LightningCount = 3;  <-- 这样道具数量就会保持玩家原本持有的数值不变
+        // PotionCount = 3;
+
+        // 3. 核心：立刻保存关卡数据到本地，覆盖掉老关卡
+        SaveAll();
+    }
+
+    public void SaveAll()
+    {
+        PlayerPrefs.Save();
+    }
+}
+```
+
+`Data\DataManager.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 79621bd1958718044a37b89b6bc61ffc
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Data\EffectManager.cs`:
+
+```cs
+using System.Collections.Generic;
+using Match3.Core;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    /// <summary>
+    /// 特效管理器（只负责 Tile 消除特效，粒子等仍由 ItemManager 自行管理）
+    /// </summary>
+    public class EffectManager : MonoBehaviour
+    {
+        public static EffectManager Instance { get; private set; }
+
+        [Header("层级设置")]
+        [SerializeField] private Transform _bgEffectContainer;
+
+        private TileClearEffect _effectPrefabTemplate;
+
+        private static readonly Color[] TileColors =
+        {
+            new Color(0.95f, 0.25f, 0.25f), // Red
+            new Color(0.25f, 0.55f, 0.95f), // Blue
+            new Color(0.25f, 0.85f, 0.35f), // Green
+            new Color(0.98f, 0.85f, 0.15f), // Yellow
+            new Color(0.65f, 0.25f, 0.95f), // Purple
+            new Color(0.98f, 0.55f, 0.10f), // Orange
+        };
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+
+            // 创建隐藏模板
+            var go = new GameObject("[Template_TileClearEffect]");
+            go.transform.SetParent(transform, false);
+            _effectPrefabTemplate = go.AddComponent<TileClearEffect>();
+            go.SetActive(false);
+        }
+
+        public void PlayClearEffect(Vector3 worldPos, TileType tileType)
+        {
+            Transform parentContainer = _bgEffectContainer != null ? _bgEffectContainer : transform;
+            var effect = GameObjectPool<TileClearEffect>.Instance.Get(_effectPrefabTemplate, parentContainer);
+            Color color = GetColor(tileType);
+            effect.gameObject.SetActive(true);
+            effect.Play(worldPos, color, () =>
+            {
+                GameObjectPool<TileClearEffect>.Instance.Release(_effectPrefabTemplate, effect);
+            });
+        }
+
+        public void PlayClearEffects(IEnumerable<(Vector3 pos, TileType type)> items)
+        {
+            foreach (var (pos, type) in items)
+                PlayClearEffect(pos, type);
+        }
+
+        private static Color GetColor(TileType type)
+        {
+            int index = (int)type;
+            return index >= 0 && index < TileColors.Length ? TileColors[index] : Color.white;
+        }
+    }
+}
+```
+
+`Data\EffectManager.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 332763f0b71720f4bb845c6c37ceca6c
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Data\LevelConfig.cs`:
+
+```cs
+using UnityEngine;
+
+namespace Match3.Data
+{
+    [CreateAssetMenu(fileName = "LevelConfig", menuName = "Match3/Level Config")]
+    public class LevelConfig : ScriptableObject
+    {
+        [Header("Grid Settings")]
+        public int Rows = 8;
+        public int Cols = 8;
+
+        [Header("Tile Types")]
+        public int TileTypeCount = 4; // how many colors to use
+
+        [Header("Win Conditions")]
+        public int TargetScore = 1000;
+        public int MaxMoves = 30;
+
+        [Header("Score Settings")]
+        public int BaseScorePerTile = 10;
+        public float ComboMultiplierStep = 0.5f; // per cascade level
+    }
+}
+
+```
+
+`Data\LevelConfig.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 311545e5bb5657348be16d54d668a57f
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Data\TileData.cs`:
+
+```cs
+using UnityEngine;
+
+namespace Match3.Data
+{
+    public enum TileType
+    {
+        Red = 0,
+        Blue = 1,
+        Green = 2,
+        Yellow = 3,
+        Purple = 4,
+        Orange = 5
+    }
+
+    public enum TileState
+    {
+        Normal,
+        Selected,
+        PendingClear,
+        Empty
+    }
+
+    [System.Serializable]
+    public class TileData
+    {
+        public TileType Type;
+        public int Row;
+        public int Col;
+        public TileState State;
+
+        public TileData(TileType type, int row, int col)
+        {
+            Type = type;
+            Row = row;
+            Col = col;
+            State = TileState.Normal;
+        }
+
+        public Vector2Int Position => new Vector2Int(Col, Row);
+
+        public override string ToString() => $"Tile[{Row},{Col}] Type={Type} State={State}";
+    }
+}
+
+```
+
+`Data\TileData.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: b63c4e8e09b5134419b0f9d57e6f4788
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`GameManager.cs`:
+
+```cs
+using DG.Tweening;
+using Match3.Core;
+using Match3.Data;
+using Match3.Systems;
+using Match3.UI;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Match3
+{
+    public class GameManager : MonoBehaviour
+    {
+        public static GameManager Instance { get; private set; }
+
+        [Header("多关卡配置")]
+        [SerializeField] private List<LevelConfig> _levels = new List<LevelConfig>();
+
+        [Header("System References")]
+        [SerializeField] private GameFlowController _flowController;
+        [SerializeField] private GridSystem _gridSystem;
+        [SerializeField] private BoardView _boardView;
+        [SerializeField] private SwapSystem _swapSystem;
+        [SerializeField] private ClearSystem _clearSystem;
+        [SerializeField] private DropSystem _dropSystem;
+        [SerializeField] private SpawnSystem _spawnSystem;
+        [SerializeField] private CascadeSystem _cascadeSystem;
+        [SerializeField] private InputController _inputController;
+        [SerializeField] private ScoreSystem _scoreSystem;
+        [SerializeField] private LevelSystem _levelSystem;
+        [SerializeField] private ItemManager _itemManager;
+
+        private int _currentLevelIndex;
+        private MatchChecker _matchChecker;
+        private bool _isInitialized;
+
+        // ─────────────────────────────────────────────────────────────
+
+        private void Awake()
+        {
+            Instance = this;
+            DOTween.SetTweensCapacity(3000, 200);
+            DOTween.defaultRecyclable = true;  // 新增
+        }
+
+        private void Start()
+        {
+            _currentLevelIndex = Mathf.Clamp(
+                DataManager.Instance.CurrentLevel - 1, 0, _levels.Count - 1);
+
+            LoadLevel(_currentLevelIndex);
+            StartGame();
+        }
+
+        private void OnDestroy()
+        {
+            if (_swapSystem != null)
+            {
+                _swapSystem.OnSwapSuccess -= OnSwapSuccess;
+                _swapSystem.OnSwapFailed -= OnSwapFailed;
+            }
+            if (_itemManager != null)
+            {
+                _itemManager.OnTilesDestroyed -= OnItemDestroyTiles;
+                _itemManager.OnTilesModified -= OnItemModifyTiles;
+            }
+        }
+
+        // ── 关卡加载 ─────────────────────────────────────────────────
+
+        public void LoadLevel(int levelIndex)
+        {
+            if (_levels == null || _levels.Count == 0)
+            {
+                Debug.LogError("[GameManager] 关卡列表为空！");
+                return;
+            }
+
+            if (levelIndex >= _levels.Count)
+            {
+                _currentLevelIndex = 0;
+                levelIndex = 0;
+                DataManager.Instance.CurrentLevel = 1;
+            }
+
+            var cfg = _levels[levelIndex];
+            int rows = cfg.Rows;
+            int cols = cfg.Cols;
+
+            _gridSystem.Initialize(rows, cols);
+            _boardView.Initialize(rows, cols);
+            _matchChecker = new MatchChecker(_gridSystem);
+            _scoreSystem.Initialize(cfg);
+            _levelSystem.Initialize(cfg, _flowController);
+
+            // ✅ 只初始化一次 SpawnSystem，并传入 MatchChecker
+            _spawnSystem.Initialize(_gridSystem, _boardView, cfg.TileTypeCount);
+            _spawnSystem.SetMatchChecker(_matchChecker);
+
+            if (!_isInitialized)
+            {
+                // 交换系统
+                _swapSystem.Initialize(_gridSystem, _boardView, _matchChecker, _flowController);
+                _swapSystem.OnSwapSuccess += OnSwapSuccess;
+                _swapSystem.OnSwapFailed += OnSwapFailed;
+
+                // 消除/下落
+                _clearSystem.Initialize(_gridSystem, _boardView);
+                _dropSystem.Initialize(_gridSystem, _boardView);
+
+                // 连锁
+                _cascadeSystem.Initialize(
+                    _gridSystem, _boardView, _matchChecker,
+                    _clearSystem, _dropSystem, _spawnSystem, _flowController);
+
+                // 输入
+                _inputController.Initialize(_flowController, _boardView, _swapSystem);
+
+                // 关卡事件
+                _levelSystem.OnWin += () => HUDController.Instance?.ShowResult(true);
+                _levelSystem.OnLose += () => HUDController.Instance?.ShowResult(false);
+
+                // 道具事件
+                if (_itemManager != null)
+                {
+                    _itemManager.OnTilesDestroyed += OnItemDestroyTiles;
+                    _itemManager.OnTilesModified += OnItemModifyTiles;
+                }
+
+                _isInitialized = true;
+            }
+
+            HUDController.Instance?.RefreshHUD();
+
+        }
+
+        public void StartGame()
+        {
+            _spawnSystem.FillBoard();
+            _flowController.SetState(GameState.Idle);
+        }
+
+        // ── 关卡切换 ─────────────────────────────────────────────────
+
+        public void EnterNextLevel()
+        {
+            _boardView.ClearAllTiles();
+            _currentLevelIndex++;
+            DataManager.Instance.CurrentLevel = _currentLevelIndex + 1;
+            DataManager.Instance.SaveAll();
+            LoadLevel(_currentLevelIndex);
+            StartGame();
+        }
+
+        public void RestartCurrentLevel()
+        {
+            _boardView.ClearAllTiles();
+            DataManager.Instance.SaveAll();
+            LoadLevel(_currentLevelIndex);
+            StartGame();
+        }
+
+        // ── 交换回调 ─────────────────────────────────────────────────
+
+        private void OnSwapSuccess()
+        {
+            _levelSystem.ConsumeMove();
+            _cascadeSystem.StartCascade();
+        }
+
+        private void OnSwapFailed()
+        {
+            _flowController.SetState(GameState.Idle);
+        }
+
+        // ── 道具回调 ─────────────────────────────────────────────────
+
+        private void OnItemDestroyTiles(List<Vector2Int> clearedPositions)
+        {
+            _levelSystem.ConsumeMove();
+            StartCoroutine(ItemDestroyRoutine(clearedPositions));
+        }
+
+        private void OnItemModifyTiles(List<Vector2Int> modifiedPositions, TileType newType)
+        {
+            _levelSystem.ConsumeMove();
+            foreach (var pos in modifiedPositions)
+            {
+                var tile = _gridSystem.Get(pos.x, pos.y);
+                if (tile != null) tile.Type = newType;
+                _boardView.ChangeTileTypeAt(pos.x, pos.y, newType);
+            }
+            StartCoroutine(ItemModifyRoutine());
+        }
+
+        // ── 道具流程协程 ─────────────────────────────────────────────
+
+        private IEnumerator ItemDestroyRoutine(List<Vector2Int> clearedPositions)
+        {
+            _flowController.SetState(GameState.Clearing);
+            yield return StartCoroutine(
+                _clearSystem.ClearMatches(new HashSet<Vector2Int>(clearedPositions), 1));
+
+            _flowController.SetState(GameState.Dropping);
+            yield return StartCoroutine(_dropSystem.ApplyGravity());
+
+            _flowController.SetState(GameState.Spawning);
+            yield return StartCoroutine(_spawnSystem.SpawnMissing());
+
+            yield return StartCoroutine(CascadeAndFinish());
+        }
+
+        private IEnumerator ItemModifyRoutine()
+        {
+            _flowController.SetState(GameState.Checking);
+            yield return new WaitForSeconds(0.1f);
+            yield return StartCoroutine(CascadeAndFinish());
+        }
+
+        /// <summary>道具触发后的连锁检测，结束后检查关卡条件</summary>
+        private IEnumerator CascadeAndFinish()
+        {
+            int cascade = 1;
+            while (true)
+            {
+                _flowController.SetState(GameState.Checking);
+                var matches = _matchChecker.FindAllMatches();
+                if (matches.Count == 0) break;
+
+                _flowController.SetState(GameState.Clearing);
+                yield return StartCoroutine(_clearSystem.ClearMatches(matches, cascade));
+
+                _flowController.SetState(GameState.Dropping);
+                yield return StartCoroutine(_dropSystem.ApplyGravity());
+
+                _flowController.SetState(GameState.Spawning);
+                yield return StartCoroutine(_spawnSystem.SpawnMissing());
+
+                cascade++;
+            }
+
+            _levelSystem.CheckConditions();
+
+            if (_flowController.CurrentState != GameState.GameOver)
+                _flowController.SetState(GameState.Idle);
+        }
+    }
+}
+```
+
+`GameManager.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: cb20a6fc3d9f91a48a5b0ae05ea95670
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 8c2c2ca615c1e9849be017f25e6d1c63
+folderAsset: yes
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\AudioManager.cs`:
+
+```cs
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class AudioManager : MonoBehaviour
+{
+    public static AudioManager Instance { get; private set; }
+
+    [Header("音频源")]
+    [SerializeField] private AudioSource bgmSource;
+    [SerializeField] private AudioSource[] sfxSources;
+
+    [Header("音频剪辑")]
+    [SerializeField] private AudioClip bgmMenu;
+    [SerializeField] private AudioClip bgmGame;
+    [SerializeField] private AudioClip clickSfx;
+    [SerializeField] private AudioClip swapSfx;
+    [SerializeField] private AudioClip matchSfx;
+    [SerializeField] private AudioClip dropSfx;
+    [SerializeField] private AudioClip winSfx;
+    [SerializeField] private AudioClip loseSfx;
+    [SerializeField] private AudioClip itemSfx;
+    [Header("道具音效")]
+    [SerializeField] private AudioClip explosionSfx;      // 炸弹爆炸
+    [SerializeField] private AudioClip lightningStrikeSfx; // 闪电击中
+    [SerializeField] private AudioClip potionBreakSfx;     // 药水破碎
+    [Header("音量设置")]
+    [Range(0f, 1f)] public float bgmVolume = 0.3f;
+    [Range(0f, 1f)] public float sfxVolume = 0.5f;
+
+    [Header("音效轮询设置")]
+    [SerializeField] private int sfxSourceCount = 4;
+
+    [Header("下落音效冷却")]
+    [SerializeField] private float dropSfxCooldown = 0.08f; // 每 0.08 秒最多播放一次
+
+    private string currentScene;
+    private int sfxIndex = 0;
+    private float lastDropTime = -1f;
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+
+        if (bgmSource == null) bgmSource = gameObject.AddComponent<AudioSource>();
+        bgmSource.loop = true;
+        bgmSource.playOnAwake = false;
+
+        if (sfxSources == null || sfxSources.Length == 0)
+        {
+            sfxSources = new AudioSource[sfxSourceCount];
+            for (int i = 0; i < sfxSourceCount; i++)
+            {
+                sfxSources[i] = gameObject.AddComponent<AudioSource>();
+                sfxSources[i].playOnAwake = false;
+            }
+        }
+
+        LoadVolume();
+    }
+
+    private void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void Start()
+    {
+        Scene currentSceneObj = SceneManager.GetActiveScene();
+        OnSceneLoaded(currentSceneObj, LoadSceneMode.Single);
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        string sceneName = scene.name;
+        if (currentScene == sceneName) return;
+        currentScene = sceneName;
+
+        if (sceneName == "MainMenu")
+        {
+            PlayBGM(bgmMenu);
+        }
+        else if (sceneName == "GameScene")
+        {
+            PlayBGM(bgmGame);
+        }
+    }
+
+    public void PlayBGM(AudioClip clip)
+    {
+        if (clip == null) return;
+        if (bgmSource.clip == clip && bgmSource.isPlaying) return;
+        bgmSource.clip = clip;
+        bgmSource.volume = bgmVolume;
+        bgmSource.Play();
+    }
+
+    public void PlaySFX(AudioClip clip, float pitch = 1f)
+    {
+        if (clip == null) return;
+
+        var source = sfxSources[sfxIndex];
+        source.pitch = pitch;
+        source.PlayOneShot(clip, sfxVolume);
+
+        sfxIndex = (sfxIndex + 1) % sfxSources.Length;
+    }
+
+    // 带冷却的下落音效（防止叠加）
+    public void PlayDrop()
+    {
+        if (dropSfx == null) return;
+
+        float now = Time.time;
+        if (lastDropTime >= 0 && now - lastDropTime < dropSfxCooldown) return;
+
+        lastDropTime = now;
+        PlaySFX(dropSfx);
+    }
+
+    public void SetBGMVolume(float vol)
+    {
+        bgmVolume = Mathf.Clamp01(vol);
+        if (bgmSource != null) bgmSource.volume = bgmVolume;
+        PlayerPrefs.SetFloat("BGMVolume", bgmVolume);
+    }
+
+    public void SetSFXVolume(float vol)
+    {
+        sfxVolume = Mathf.Clamp01(vol);
+        PlayerPrefs.SetFloat("SFXVolume", sfxVolume);
+    }
+
+    private void LoadVolume()
+    {
+        bgmVolume = PlayerPrefs.GetFloat("BGMVolume", 0.3f);
+        sfxVolume = PlayerPrefs.GetFloat("SFXVolume", 0.5f);
+        if (bgmSource) bgmSource.volume = bgmVolume;
+    }
+
+    // ========== 便捷调用方法 ==========
+    public void ButtonClick()
+    {
+        PlaySFX(clickSfx);
+    }
+
+    public void PlaySwap() => PlaySFX(swapSfx);
+    public void PlayMatch() => PlaySFX(matchSfx);
+    // public void PlayDrop() => PlaySFX(dropSfx); // 已被上面的带冷却版本替代
+    public void PlayWin() => PlaySFX(winSfx);
+    public void PlayLose() => PlaySFX(loseSfx);
+    public void PlayItem() => PlaySFX(itemSfx);
+    // 道具生效音效
+    public void PlayExplosion() => PlaySFX(explosionSfx);
+    public void PlayLightningStrike() => PlaySFX(lightningStrikeSfx);
+    public void PlayPotionBreak() => PlaySFX(potionBreakSfx);
+}
+```
+
+`Systems\AudioManager.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: dc4ec3968e179a04ca01395917316a27
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\BoardView.cs`:
+
+```cs
+using System.Collections.Generic;
+using DG.Tweening;
+using Match3.Core;
+using Match3.Data;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Match3.Systems
+{
+    public class BoardView : MonoBehaviour
+    {
+        public static BoardView Instance { get; private set; }
+
+        [Header("Tile 设置")]
+        [SerializeField] private TileView _tilePrefab;
+        [SerializeField] private Sprite[] _tileSprites;
+
+        [Header("棋盘格子（按从左上到右下顺序拖入，共64个）")]
+        [SerializeField] private RectTransform[] _cells; // 64个，含角落占位
+
+        private TileView[,] _views;
+        private int _rows, _cols;
+        private Rect[] _cellWorldRects;
+        private Vector3[] _cellWorldPositions;
+        private (int row, int col)[] _indexToRowCol; // 索引到行列的映射
+
+        public int Rows => _rows;
+        public int Cols => _cols;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(int rows, int cols)
+        {
+            _rows = rows;
+            _cols = cols;
+            _views = new TileView[rows, cols];
+            StartCoroutine(BakeCellRectsNextFrame());
+        }
+
+        private System.Collections.IEnumerator BakeCellRectsNextFrame()
+        {
+            yield return null;
+            BakeCellRects();
+        }
+
+        private int GridToIndex(int row, int col)
+        {
+            int visualRow = (_rows - 1 - row);
+            return visualRow * _cols + col;
+        }
+
+        private RectTransform GetCell(int row, int col)
+        {
+            int index = GridToIndex(row, col);
+            if (index < 0 || index >= _cells.Length) return null;
+            return _cells[index];
+        }
+
+        public Vector3 GridToWorld(int row, int col)
+        {
+            int index = GridToIndex(row, col);
+            if (index < 0 || index >= _cellWorldPositions.Length) return Vector3.zero;
+            return _cellWorldPositions[index];
+        }
+
+        public TileView SpawnView(TileData data)
+        {
+            var cell = GetCell(data.Row, data.Col);
+            if (cell == null) return null;
+
+            var view = GameObjectPool<TileView>.Instance.Get(_tilePrefab, cell);
+            var rt = view.transform as RectTransform;
+            if (rt != null)
+            {
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = Vector2.zero;
+                rt.offsetMax = Vector2.zero;
+                rt.localScale = Vector3.one;
+            }
+
+            view.Initialize(data, _tileSprites[(int)data.Type]);
+            _views[data.Row, data.Col] = view;
+            return view;
+        }
+
+        public TileView GetView(int row, int col) => _views[row, col];
+        public void SetView(int row, int col, TileView view) => _views[row, col] = view;
+        public void ClearViewRef(int row, int col) => _views[row, col] = null;
+
+        public Tween AnimateSwap(int r1, int c1, int r2, int c2, float duration = 0.25f)
+        {
+            var v1 = _views[r1, c1];
+            var v2 = _views[r2, c2];
+
+            _views[r1, c1] = v2;
+            _views[r2, c2] = v1;
+
+            var cell1 = GetCell(r1, c1);
+            var cell2 = GetCell(r2, c2);
+
+            var seq = DOTween.Sequence();
+
+            if (v1 != null && cell2 != null)
+                seq.Join(v1.MoveTo(cell2, duration).OnComplete(() => { if (v1 != null && cell2 != null) v1.transform.SetParent(cell2, true); }));
+            if (v2 != null && cell1 != null)
+                seq.Join(v2.MoveTo(cell1, duration).OnComplete(() => { if (v2 != null && cell1 != null) v2.transform.SetParent(cell1, true); }));
+
+            return seq;
+        }
+
+        public Tween AnimateClear(List<Vector2Int> positions)
+        {
+            var seq = DOTween.Sequence();
+            int count = positions.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var pos = positions[i];
+                var view = _views[pos.x, pos.y];
+                if (view == null) continue;
+
+                seq.Join(view.PlayClearAnimation()
+                    .OnComplete(() => GameObjectPool<TileView>.Instance.Release(_tilePrefab, view)));
+
+                _views[pos.x, pos.y] = null;
+            }
+            return seq;
+        }
+
+        public Tween AnimateDrop(Dictionary<Vector2Int, Vector2Int> dropMap)
+        {
+            var seq = DOTween.Sequence();
+            foreach (var kv in dropMap)
+            {
+                var dst = kv.Key;
+                var src = kv.Value;
+                var view = _views[src.x, src.y];
+                if (view == null) continue;
+
+                _views[dst.x, dst.y] = view;
+                _views[src.x, src.y] = null;
+
+                var dstCell = GetCell(dst.x, dst.y);
+                if (dstCell != null)
+                {
+                    // 每个棋子开始移动时播放音效
+                    var moveTween = view.MoveTo(dstCell, 0.3f)
+                        .OnStart(() => AudioManager.Instance?.PlayDrop()) // 👈 添加这一行
+                        .OnComplete(() => {
+                            if (view != null && dstCell != null)
+                                view.transform.SetParent(dstCell, true);
+                        });
+                    seq.Join(moveTween);
+                }
+            }
+            return seq;
+        }
+
+        public Tween AnimateSpawn(List<TileData> newTiles)
+        {
+            var seq = DOTween.Sequence();
+            int count = newTiles.Count;
+            float offsetHeight = _cells[0] != null ? _cells[0].rect.height * 1.5f : 150f;
+
+            for (int i = 0; i < count; i++)
+            {
+                var data = newTiles[i];
+                var targetCell = GetCell(data.Row, data.Col);
+                if (targetCell == null) continue;
+
+                var view = GameObjectPool<TileView>.Instance.Get(_tilePrefab, targetCell);
+                var rt = view.transform as RectTransform;
+                if (rt != null)
+                {
+                    rt.anchorMin = Vector2.zero;
+                    rt.anchorMax = Vector2.one;
+                    rt.offsetMin = Vector2.zero;
+                    rt.offsetMax = Vector2.zero;
+                    rt.localScale = Vector3.zero;
+                }
+
+                Vector3 startWorld = GridToWorld(_rows - 1, data.Col);
+                if (startWorld != Vector3.zero)
+                    startWorld.y += offsetHeight;
+                else
+                    startWorld = targetCell.position + Vector3.up * 200f;
+
+                view.transform.position = startWorld;
+                view.Initialize(data, _tileSprites[(int)data.Type]);
+                _views[data.Row, data.Col] = view;
+
+                seq.Join(rt.DOScale(Vector3.one, 0.15f));
+                seq.Join(view.transform
+                    .DOMove(targetCell.position, 0.5f)
+                    .SetEase(Ease.OutQuad)
+                    .OnComplete(() =>
+                    {
+                        if (view != null && targetCell != null && view.gameObject.activeSelf)
+                            view.transform.SetParent(targetCell, true);
+                    }));
+            }
+            return seq;
+        }
+
+        public void ClearTileAtDirectly(int r, int c)
+        {
+            TileView view = _views[r, c];
+            if (view != null)
+            {
+                view.transform.DOKill();
+                view.PlayClearAnimation().OnComplete(() => {
+                    GameObjectPool<TileView>.Instance.Release(_tilePrefab, view);
+                });
+                _views[r, c] = null;
+            }
+        }
+
+        public List<TileView> GetAllViewsOfType(TileType type)
+        {
+            List<TileView> list = new List<TileView>();
+            for (int r = 0; r < _rows; r++)
+            {
+                for (int c = 0; c < _cols; c++)
+                {
+                    if (_views[r, c] != null && _views[r, c].Data.Type == type)
+                    {
+                        list.Add(_views[r, c]);
+                    }
+                }
+            }
+            return list;
+        }
+
+        public void ChangeTileTypeAt(int r, int c, TileType newType)
+        {
+            TileView view = _views[r, c];
+            if (view != null)
+            {
+                view.Data.Type = newType;
+                view.Initialize(view.Data, _tileSprites[(int)newType]);
+            }
+        }
+
+        public void ClearAllTiles()
+        {
+            if (_views == null) return;
+
+            for (int r = 0; r < _rows; r++)
+            {
+                for (int c = 0; c < _cols; c++)
+                {
+                    TileView view = _views[r, c];
+                    if (view != null)
+                    {
+                        view.transform.DOKill();
+                        GameObjectPool<TileView>.Instance.Release(_tilePrefab, view);
+                        _views[r, c] = null;
+                    }
+                }
+            }
+        }
+
+        private void BakeCellRects()
+        {
+            int length = _cells.Length;
+            _cellWorldRects = new Rect[length];
+            _cellWorldPositions = new Vector3[length];
+            _indexToRowCol = new (int, int)[length];
+
+            var corners = new Vector3[4];
+            for (int i = 0; i < length; i++)
+            {
+                if (_cells[i] == null) continue;
+
+                _cellWorldPositions[i] = _cells[i].position;
+
+                _cells[i].GetWorldCorners(corners);
+                _cellWorldRects[i] = new Rect(
+                    corners[0].x,
+                    corners[0].y,
+                    corners[2].x - corners[0].x,
+                    corners[2].y - corners[0].y);
+
+                // 反向计算行列映射
+                for (int r = 0; r < _rows; r++)
+                {
+                    for (int c = 0; c < _cols; c++)
+                    {
+                        if (GridToIndex(r, c) == i)
+                        {
+                            _indexToRowCol[i] = (r, c);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        public bool WorldToGrid(Vector3 worldPos, out int row, out int col)
+        {
+            if (_cellWorldRects == null)
+            {
+                row = col = -1;
+                return false;
+            }
+
+            Vector2 checkPos = new Vector2(worldPos.x, worldPos.y);
+            int length = _cellWorldRects.Length;
+            for (int i = 0; i < length; i++)
+            {
+                if (_cellWorldRects[i].Contains(checkPos))
+                {
+                    (row, col) = _indexToRowCol[i];
+                    return true;
+                }
+            }
+
+            row = col = -1;
+            return false;
+        }
+    }
+}
+```
+
+`Systems\BoardView.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: ae511e6ddf9d4944a80e4fd013c5c7ff
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\CascadeSystem.cs`:
+
+```cs
+using DG.Tweening;
+using Match3.Core;
+using System.Collections;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    public class CascadeSystem : MonoBehaviour
+    {
+        public static CascadeSystem Instance { get; private set; }
+
+        private GridSystem _grid;
+        private BoardView _boardView;
+        private MatchChecker _matchChecker;
+        private ClearSystem _clearSystem;
+        private DropSystem _dropSystem;
+        private SpawnSystem _spawnSystem;
+        private GameFlowController _flow;
+        private DeadlockChecker _deadlockChecker;
+
+        [SerializeField] private int _maxShuffleAttempts = 10;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(
+            GridSystem grid,
+            BoardView boardView,
+            MatchChecker matchChecker,
+            ClearSystem clearSystem,
+            DropSystem dropSystem,
+            SpawnSystem spawnSystem,
+            GameFlowController flow)
+        {
+            _grid = grid;
+            _boardView = boardView;
+            _matchChecker = matchChecker;
+            _clearSystem = clearSystem;
+            _dropSystem = dropSystem;
+            _spawnSystem = spawnSystem;
+            _flow = flow;
+            _deadlockChecker = new DeadlockChecker(grid, matchChecker);
+        }
+
+        public void StartCascade()
+        {
+            StartCoroutine(CascadeLoop());
+        }
+
+        private IEnumerator CascadeLoop()
+        {
+            int cascadeLevel = 0;
+
+            while (true)
+            {
+                _flow.SetState(GameState.Checking);
+                var matches = _matchChecker.FindAllMatches();
+                if (matches.Count == 0) break;
+
+                _flow.SetState(GameState.Clearing);
+                yield return StartCoroutine(_clearSystem.ClearMatches(matches, cascadeLevel));
+
+                _flow.SetState(GameState.Dropping);
+                yield return StartCoroutine(_dropSystem.ApplyGravity());
+
+                _flow.SetState(GameState.Spawning);
+                yield return StartCoroutine(_spawnSystem.SpawnMissing());
+
+                cascadeLevel++;
+                yield return null;
+            }
+
+            // Cascade 结束后检测无解
+            yield return StartCoroutine(HandleDeadlockIfNeeded());
+
+            LevelSystem.Instance?.CheckConditions();
+            if (!_flow.IsGameOver)
+                _flow.SetState(GameState.Idle);
+        }
+
+        private IEnumerator HandleDeadlockIfNeeded()
+        {
+            int attempts = 0;
+            while (!_deadlockChecker.HasValidMove() && attempts < _maxShuffleAttempts)
+            {
+                yield return StartCoroutine(ShuffleBoard());
+                attempts++;
+            }
+
+            if (attempts >= _maxShuffleAttempts)
+                Debug.LogWarning("[Deadlock] 多次洗牌仍无解，可能颜色种类太少");
+        }
+
+        private IEnumerator ShuffleBoard()
+        {
+            // 收集所有有效Tile的数据
+            var allTiles = new System.Collections.Generic.List<Match3.Data.TileData>();
+            for (int r = 0; r < _grid.Rows; r++)
+                for (int c = 0; c < _grid.Cols; c++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    var tile = _grid.Get(r, c);
+                    if (tile != null) allTiles.Add(tile);
+                }
+
+            // Fisher-Yates 洗牌
+            for (int i = allTiles.Count - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                var tmp = allTiles[i];
+                allTiles[i] = allTiles[j];
+                allTiles[j] = tmp;
+            }
+
+            // 把洗完的类型写回格子
+            int index = 0;
+            for (int r = 0; r < _grid.Rows; r++)
+            {
+                for (int c = 0; c < _grid.Cols; c++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    var tile = _grid.Get(r, c);
+                    if (tile == null) continue;
+                    tile.Type = allTiles[index].Type;
+                    _boardView.ChangeTileTypeAt(r, c, tile.Type);
+                    index++;
+                }
+            }
+
+            // 洗牌动画：全部抖一下
+            yield return ShuffleAnimation();
+        }
+
+        private IEnumerator ShuffleAnimation()
+        {
+            var seq = DG.Tweening.DOTween.Sequence();
+            for (int r = 0; r < _grid.Rows; r++)
+                for (int c = 0; c < _grid.Cols; c++)
+                {
+                    var view = _boardView.GetView(r, c);
+                    if (view == null) continue;
+                    seq.Join(view.transform
+                        .DOPunchScale(Vector3.one * 0.2f, 0.3f, 5, 0.5f));
+                }
+            yield return seq.WaitForCompletion();
+        }
+    }
+}
+```
+
+`Systems\CascadeSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: e1d1ce5afdd35874cae8d6f26b6817b7
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\ClearSystem.cs`:
+
+```cs
+using System.Collections;
+using System.Collections.Generic;
+using DG.Tweening;
+using Match3.Core;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    public class ClearSystem : MonoBehaviour
+    {
+        public static ClearSystem Instance { get; private set; }
+
+        private GridSystem _grid;
+        private BoardView _boardView;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(GridSystem grid, BoardView boardView)
+        {
+            _grid = grid;
+            _boardView = boardView;
+        }
+
+        /// <summary>Clears positions, returns count cleared.</summary>
+        public IEnumerator ClearMatches(HashSet<Vector2Int> positions, int cascadeLevel)
+        {
+            // 标记为待清除
+            foreach (var pos in positions)
+            {
+                var tile = _grid.Get(pos.x, pos.y);
+                if (tile != null) tile.State = TileState.PendingClear;
+            }
+
+            // 加分数
+            ScoreSystem.Instance?.AddScore(positions.Count, cascadeLevel);
+
+            // ✅ 只播放一次消除音效
+            AudioManager.Instance?.PlayMatch();
+
+            // 播放消除特效
+            if (EffectManager.Instance != null)
+            {
+                foreach (var pos in positions)
+                {
+                    var tile = _grid.Get(pos.x, pos.y);
+                    if (tile == null) continue;
+                    Vector3 worldPos = BoardView.Instance.GridToWorld(pos.x, pos.y);
+                    EffectManager.Instance.PlayClearEffect(worldPos, tile.Type);
+                }
+            }
+
+            // 播放消除动画
+            var posList = new List<Vector2Int>(positions);
+            var tween = _boardView.AnimateClear(posList);
+            yield return tween.WaitForCompletion();
+
+            // 清除数据
+            foreach (var pos in positions)
+                _grid.Clear(pos.x, pos.y);
+        }
+    }
+}
+```
+
+`Systems\ClearSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: fd8ccbee957ce394bb91c52b6c48cb31
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\DeadlockChecker.cs`:
+
+```cs
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    public class DeadlockChecker
+    {
+        private readonly GridSystem _grid;
+        private readonly MatchChecker _matchChecker;
+
+        public DeadlockChecker(GridSystem grid, MatchChecker matchChecker)
+        {
+            _grid = grid;
+            _matchChecker = matchChecker;
+        }
+
+        /// <summary>扫描全盘，是否存在至少一个合法交换</summary>
+        public bool HasValidMove()
+        {
+            for (int r = 0; r < _grid.Rows; r++)
+            {
+                for (int c = 0; c < _grid.Cols; c++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    if (_grid.IsEmpty(r, c)) continue;
+
+                    // 只检查右和上，避免重复检测
+                    if (CheckSwap(r, c, r, c + 1)) return true;
+                    if (CheckSwap(r, c, r + 1, c)) return true;
+                }
+            }
+            return false;
+        }
+
+        private bool CheckSwap(int r1, int c1, int r2, int c2)
+        {
+            if (!_grid.InBounds(r2, c2)) return false;
+            if (_grid.IsBlocked(r2, c2)) return false;
+            if (_grid.IsEmpty(r2, c2)) return false;
+            return _matchChecker.WouldSwapMatch(r1, c1, r2, c2);
+        }
+    }
+}
+```
+
+`Systems\DeadlockChecker.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 0111c5ac24ce65c46a5a32000aecdc84
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\DropSystem.cs`:
+
+```cs
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using DG.Tweening;
+
+namespace Match3.Systems
+{
+    /// <summary>
+    /// Computes and executes the downward gravity pass.
+    /// Tiles above empty cells fall to fill them.
+    /// </summary>
+    public class DropSystem : MonoBehaviour
+    {
+        public static DropSystem Instance { get; private set; }
+
+        private GridSystem _grid;
+        private BoardView _boardView;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(GridSystem grid, BoardView boardView)
+        {
+            _grid = grid;
+            _boardView = boardView;
+        }
+
+        public IEnumerator ApplyGravity()
+        {
+            AudioManager.Instance?.PlayDrop();
+            var dropMap = new Dictionary<Vector2Int, Vector2Int>();
+
+            for (int c = 0; c < _grid.Cols; c++)
+            {
+                int emptyRow = -1;
+                for (int r = 0; r < _grid.Rows; r++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue; // ← 加这行
+
+                    if (_grid.IsEmpty(r, c))
+                    {
+                        if (emptyRow == -1) emptyRow = r;
+                    }
+                    else if (emptyRow != -1)
+                    {
+                        var tile = _grid.Get(r, c);
+                        dropMap[new Vector2Int(emptyRow, c)] = new Vector2Int(r, c);
+                        _grid.Set(emptyRow, c, tile);
+                        _grid.Clear(r, c);
+                        emptyRow++;
+                    }
+                }
+            }
+
+            if (dropMap.Count > 0)
+            {
+                var tween = _boardView.AnimateDrop(dropMap);
+                yield return tween.WaitForCompletion();
+            }
+        }
+    }
+}
+
+```
+
+`Systems\DropSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 26c8f19c5c07a914ea9b04fd7194caaa
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\GridSystem.cs`:
+
+```cs
+using System.Collections.Generic;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    /// <summary>
+    /// Owns the raw data grid. Does NOT know about GameObjects or visuals.
+    /// Every system reads/writes tile data through here.
+    /// </summary>
+    public class GridSystem : MonoBehaviour
+    {
+        public static GridSystem Instance { get; private set; }
+
+        [HideInInspector] public int Rows;
+        [HideInInspector] public int Cols;
+
+        private TileData[,] _grid;
+        private bool[,] _isBlocked; // 预计算屏蔽格
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(int rows, int cols)
+        {
+            Rows = rows;
+            Cols = cols;
+            _grid = new TileData[rows, cols];
+            PrecomputeBlockedCells();
+        }
+
+        private void PrecomputeBlockedCells()
+        {
+            _isBlocked = new bool[Rows, Cols];
+            int cornerSize = 1; // 与 IsBlocked 逻辑一致
+            for (int r = 0; r < Rows; r++)
+            {
+                for (int c = 0; c < Cols; c++)
+                {
+                    bool topLeft = r >= Rows - cornerSize && c < cornerSize;
+                    bool topRight = r >= Rows - cornerSize && c >= Cols - cornerSize;
+                    bool bottomLeft = r < cornerSize && c < cornerSize;
+                    bool bottomRight = r < cornerSize && c >= Cols - cornerSize;
+                    _isBlocked[r, c] = topLeft || topRight || bottomLeft || bottomRight;
+                }
+            }
+        }
+
+        public TileData Get(int row, int col)
+        {
+            if (!InBounds(row, col)) return null;
+            return _grid[row, col];
+        }
+
+        public void Set(int row, int col, TileData data)
+        {
+            if (!InBounds(row, col)) return;
+            _grid[row, col] = data;
+            if (data != null)
+            {
+                data.Row = row;
+                data.Col = col;
+            }
+        }
+
+        public bool InBounds(int row, int col) =>
+            row >= 0 && row < Rows && col >= 0 && col < Cols;
+
+        public bool IsEmpty(int row, int col) =>
+            InBounds(row, col) && (_grid[row, col] == null || _grid[row, col].State == TileState.Empty);
+
+        /// <summary>Returns all empty positions (bottom-up, left-right).</summary>
+        public List<Vector2Int> GetEmptyPositions()
+        {
+            var result = new List<Vector2Int>();
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                    if (IsEmpty(r, c))
+                        result.Add(new Vector2Int(r, c));
+            return result;
+        }
+
+        public void Swap(int r1, int c1, int r2, int c2)
+        {
+            if (!InBounds(r1, c1) || !InBounds(r2, c2))
+            {
+                Debug.LogWarning($"[GridSystem] Swap 越界：({r1},{c1}) <-> ({r2},{c2})");
+                return;
+            }
+
+            var tmp = _grid[r1, c1];
+            _grid[r1, c1] = _grid[r2, c2];
+            _grid[r2, c2] = tmp;
+
+            if (_grid[r1, c1] != null) { _grid[r1, c1].Row = r1; _grid[r1, c1].Col = c1; }
+            if (_grid[r2, c2] != null) { _grid[r2, c2].Row = r2; _grid[r2, c2].Col = c2; }
+        }
+
+        public void Clear(int row, int col)
+        {
+            _grid[row, col] = null;
+        }
+
+        public void DebugPrint()
+        {
+            string s = "Grid:\n";
+            for (int r = Rows - 1; r >= 0; r--)
+            {
+                for (int c = 0; c < Cols; c++)
+                    s += (_grid[r, c] != null ? ((int)_grid[r, c].Type).ToString() : "_") + " ";
+                s += "\n";
+            }
+        }
+
+        /// <summary>该格子是否是被屏蔽的角落（不参与游戏）</summary>
+        public bool IsBlocked(int row, int col)
+        {
+            if (!InBounds(row, col)) return true;
+            return _isBlocked[row, col];
+        }
+    }
+}
+```
+
+`Systems\GridSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 99533dec09dcd6a468087c231deee371
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\InputController.cs`:
+
+```cs
+using Match3.Core;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    /// <summary>
+    /// 统一处理 PC鼠标 和 手机触摸 两套输入，支持：
+    ///   - 点击选中 → 再点击相邻格子 → 交换
+    ///   - 按住拖拽 → 松手时根据方向交换
+    /// 两套逻辑共用同一套状态，互不干扰。
+    /// 只有在 GameState.Idle 时才接受输入。
+    /// </summary>
+    public class InputController : MonoBehaviour
+    {
+        // ── 可调参数 ────────────────────────────────────────────────────
+        /// <summary>拖拽生效的最小像素距离（小于此视为点击）</summary>
+        [SerializeField] private float _dragThresholdPixels = 20f;
+
+        // ── 依赖 ────────────────────────────────────────────────────────
+        private GameFlowController _flow;
+        private BoardView _boardView;
+        private SwapSystem _swapSystem;
+        private Camera _cam;
+
+        // ── 状态 ────────────────────────────────────────────────────────
+        // 选中（点击模式）
+        private int _selectedRow = -1;
+        private int _selectedCol = -1;
+        private bool _hasSelection;
+
+        // 按下起始信息（拖拽判断用）
+        private Vector2 _pressScreenPos;   // 按下时的屏幕坐标
+        private int _pressRow = -1;
+        private int _pressCol = -1;
+        private bool _isPressing;          // 当前是否处于按下状态
+        private bool _dragFired;           // 本次按下是否已触发过拖拽交换
+
+        // ── 初始化 ───────────────────────────────────────────────────────
+        public void Initialize(GameFlowController flow, BoardView boardView, SwapSystem swapSystem)
+        {
+            _flow = flow;
+            _boardView = boardView;
+            _swapSystem = swapSystem;
+            _cam = Camera.main;
+        }
+
+        // ── Update 主循环 ────────────────────────────────────────────────
+        private void Update()
+        {
+            // 手机触摸优先；有触摸时忽略鼠标，避免双重触发
+            if (Input.touchCount > 0)
+            {
+                HandleTouch();
+            }
+            else
+            {
+                HandleMouse();
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 鼠标输入
+        // ════════════════════════════════════════════════════════════════
+
+        private void HandleMouse()
+        {
+            if (Input.GetMouseButtonDown(0))
+                OnPointerDown(Input.mousePosition);
+
+            if (Input.GetMouseButton(0) && _isPressing)
+                OnPointerMove(Input.mousePosition);
+
+            if (Input.GetMouseButtonUp(0) && _isPressing)
+                OnPointerUp(Input.mousePosition);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 触摸输入（单指）
+        // ════════════════════════════════════════════════════════════════
+
+        private void HandleTouch()
+        {
+            // 只处理第一根手指
+            Touch touch = Input.GetTouch(0);
+
+            switch (touch.phase)
+            {
+                case TouchPhase.Began:
+                    OnPointerDown(touch.position);
+                    break;
+                case TouchPhase.Moved:
+                case TouchPhase.Stationary:
+                    if (_isPressing)
+                        OnPointerMove(touch.position);
+                    break;
+                case TouchPhase.Ended:
+                case TouchPhase.Canceled:
+                    if (_isPressing)
+                        OnPointerUp(touch.position);
+                    break;
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 统一指针逻辑
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>按下/触摸开始</summary>
+        private void OnPointerDown(Vector2 screenPos)
+        {
+            if (!_flow.CanAcceptInput) return;
+
+            Vector3 world = ScreenToWorld(screenPos);
+            if (!_boardView.WorldToGrid(world, out int row, out int col))
+            {
+                // 点到空白区域：取消已有选中
+                ClearSelection();
+                return;
+            }
+
+            _isPressing = true;
+            _dragFired = false;
+            _pressScreenPos = screenPos;
+            _pressRow = row;
+            _pressCol = col;
+        }
+
+        /// <summary>移动中：实时判断是否达到拖拽阈值</summary>
+        private void OnPointerMove(Vector2 screenPos)
+        {
+            if (_dragFired) return;
+            if (!_flow.CanAcceptInput) return;
+
+            float dist = Vector2.Distance(screenPos, _pressScreenPos);
+            if (dist < _dragThresholdPixels) return;
+
+            Vector2 delta = screenPos - _pressScreenPos;
+            int targetRow = _pressRow;
+            int targetCol = _pressCol;
+
+            if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+                targetCol += delta.x > 0 ? 1 : -1;
+            else
+                targetRow += delta.y > 0 ? 1 : -1;
+
+            // 拖出棋盘边界直接忽略，不触发交换
+            if (!GridSystem.Instance.InBounds(targetRow, targetCol))
+            {
+                _dragFired = true; // 标记为已处理，避免反复触发
+                return;
+            }
+
+            _dragFired = true;
+            ClearSelection();
+            TrySwap(_pressRow, _pressCol, targetRow, targetCol);
+        }
+
+        /// <summary>抬起/触摸结束：若没拖拽则视为点击</summary>
+        private void OnPointerUp(Vector2 screenPos)
+        {
+            _isPressing = false;
+
+            if (_dragFired)
+            {
+                // 本次已是拖拽，不再处理点击逻辑
+                _dragFired = false;
+                return;
+            }
+
+            // 未达到拖拽阈值 → 走点击逻辑
+            if (!_flow.CanAcceptInput) return;
+
+            Vector3 world = ScreenToWorld(screenPos);
+            if (!_boardView.WorldToGrid(world, out int row, out int col))
+            {
+                ClearSelection();
+                return;
+            }
+
+            HandleClickOnTile(row, col);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 点击逻辑（两步选中）
+        // ════════════════════════════════════════════════════════════════
+
+        private void HandleClickOnTile(int row, int col)
+        {
+            if (!_hasSelection)
+            {
+                // 第一步：选中
+                SelectTile(row, col);
+            }
+            else
+            {
+                if (row == _selectedRow && col == _selectedCol)
+                {
+                    // 再次点击同一格：取消选中
+                    ClearSelection();
+                    return;
+                }
+
+                // 第二步：尝试交换
+                int r1 = _selectedRow, c1 = _selectedCol;
+                ClearSelection();
+                TrySwap(r1, c1, row, col);
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 辅助方法
+        // ════════════════════════════════════════════════════════════════
+
+        private void TrySwap(int r1, int c1, int r2, int c2)
+        {
+            _flow.SetState(GameState.Selecting);
+            _swapSystem.TrySwap(r1, c1, r2, c2);
+        }
+
+        private void SelectTile(int row, int col)
+        {
+            _hasSelection = true;
+            _selectedRow = row;
+            _selectedCol = col;
+
+            _boardView.GetView(row, col)?.SetSelected(true);
+        }
+
+        private void ClearSelection()
+        {
+            if (_hasSelection)
+                _boardView.GetView(_selectedRow, _selectedCol)?.SetSelected(false);
+
+            _hasSelection = false;
+            _selectedRow = _selectedCol = -1;
+        }
+
+        private Vector3 ScreenToWorld(Vector2 screenPos)
+        {
+            Vector3 world = _cam.ScreenToWorldPoint(new Vector3(screenPos.x, screenPos.y, 0f));
+            world.z = 0f;
+            return world;
+        }
+    }
+}
+
+```
+
+`Systems\InputController.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: d44dba819c0fa164e89dc243a069f58a
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\ItemManager.cs`:
+
+```cs
+using System.Collections;
+using System.Collections.Generic;
+using DG.Tweening;
+using Match3.Core;
+using Match3.Data;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Match3.Systems
+{
+    public class ItemManager : MonoBehaviour
+    {
+        [Header("Dependencies")]
+        [SerializeField] private BoardView _boardView;
+        [SerializeField] private RectTransform _effectCanvas;
+        [SerializeField] private Canvas _canvas;
+
+        [Header("Bomb")]
+        [SerializeField] private Button _bombButton;
+        [SerializeField] private TMP_Text _bombNumberText;
+        [SerializeField] private GameObject _bombIconPrefab;
+
+        [Header("Lightning")]
+        [SerializeField] private Button _lightningButton;
+        [SerializeField] private TMP_Text _lightningNumberText;
+        [SerializeField] private GameObject _lightningIconPrefab;
+
+        [Header("Potion")]
+        [SerializeField] private Button _potionButton;
+        [SerializeField] private TMP_Text _potionNumberText;
+        [SerializeField] private GameObject _potionIconPrefab;
+
+        [Header("Ad Reward Panel")]
+        [SerializeField] private AdRewardPanel adRewardPanel;
+
+        public event System.Action<List<Vector2Int>> OnTilesDestroyed;
+        public event System.Action<List<Vector2Int>, TileType> OnTilesModified;
+
+        private Camera UICamera => _canvas.worldCamera;
+        private Sprite _squareSprite;
+
+        // Particle pool
+        private readonly Queue<(GameObject go, Image img, RectTransform rt)> _particlePool
+            = new Queue<(GameObject, Image, RectTransform)>();
+        private const int PARTICLE_POOL_SIZE = 80;
+
+        // Line pool and shockwave pool
+        private Queue<GameObject> _linePool = new Queue<GameObject>();
+        private Queue<GameObject> _shockwavePool = new Queue<GameObject>();
+        private const int LINE_POOL_SIZE = 25;
+        private const int SHOCKWAVE_POOL_SIZE = 15;
+
+        private void Start()
+        {
+            if (_boardView == null) _boardView = BoardView.Instance;
+
+            _bombButton.onClick.AddListener(() => TryUseBomb());
+            _lightningButton.onClick.AddListener(() => TryUseLightning());
+            _potionButton.onClick.AddListener(() => TryUsePotion());
+
+            GenerateSquareSprite();
+            WarmParticlePool();
+            WarmLinePool();
+            WarmShockwavePool();
+            RefreshItemUI();
+        }
+
+        private void GenerateSquareSprite()
+        {
+            var tex = new Texture2D(8, 8);
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 8; x++)
+                    tex.SetPixel(x, y, Color.white);
+            tex.Apply();
+            _squareSprite = Sprite.Create(tex, new Rect(0, 0, 8, 8), Vector2.one * 0.5f);
+        }
+
+        // ========== Particle Pool ==========
+        private void WarmParticlePool()
+        {
+            for (int i = 0; i < PARTICLE_POOL_SIZE; i++)
+            {
+                var item = CreateParticle();
+                item.go.SetActive(false);
+                _particlePool.Enqueue(item);
+            }
+        }
+
+        private (GameObject go, Image img, RectTransform rt) CreateParticle()
+        {
+            var go = new GameObject("CubeParticle");
+            go.transform.SetParent(_effectCanvas, false);
+            var rt = go.AddComponent<RectTransform>();
+            var img = go.AddComponent<Image>();
+            img.sprite = _squareSprite;
+            img.raycastTarget = false;
+            return (go, img, rt);
+        }
+
+        private (GameObject go, Image img, RectTransform rt) GetParticle()
+        {
+            if (_particlePool.Count > 0)
+            {
+                var item = _particlePool.Dequeue();
+                item.go.SetActive(true);
+                return item;
+            }
+            return CreateParticle();
+        }
+
+        private void ReleaseParticle(GameObject go, Image img, RectTransform rt)
+        {
+            if (go == null) return;
+            go.SetActive(false);
+            rt.localScale = Vector3.one;
+            rt.localRotation = Quaternion.identity;
+            img.color = Color.white;
+            go.transform.SetParent(_effectCanvas, false);
+            _particlePool.Enqueue((go, img, rt));
+        }
+
+        // ========== Line Pool ==========
+        private void WarmLinePool()
+        {
+            for (int i = 0; i < LINE_POOL_SIZE; i++)
+            {
+                var go = CreateLineObject();
+                go.SetActive(false);
+                _linePool.Enqueue(go);
+            }
+        }
+
+        private GameObject CreateLineObject()
+        {
+            var go = new GameObject("Line");
+            go.transform.SetParent(_effectCanvas, false);
+            var rt = go.AddComponent<RectTransform>();
+            var img = go.AddComponent<Image>();
+            img.sprite = _squareSprite;
+            img.raycastTarget = false;
+            return go;
+        }
+
+        private GameObject GetLineObject()
+        {
+            if (_linePool.Count > 0)
+            {
+                var go = _linePool.Dequeue();
+                go.SetActive(true);
+                return go;
+            }
+            return CreateLineObject();
+        }
+
+        private void ReleaseLineObject(GameObject go)
+        {
+            if (go == null) return;
+            go.SetActive(false);
+            var rt = go.GetComponent<RectTransform>();
+            var img = go.GetComponent<Image>();
+            if (rt != null)
+            {
+                rt.localScale = Vector3.one;
+                rt.rotation = Quaternion.identity;
+            }
+            if (img != null) img.color = Color.white;
+            _linePool.Enqueue(go);
+        }
+
+        // ========== Shockwave Pool ==========
+        private void WarmShockwavePool()
+        {
+            for (int i = 0; i < SHOCKWAVE_POOL_SIZE; i++)
+            {
+                var go = CreateShockwaveObject();
+                go.SetActive(false);
+                _shockwavePool.Enqueue(go);
+            }
+        }
+
+        private GameObject CreateShockwaveObject()
+        {
+            var go = new GameObject("Shockwave");
+            go.transform.SetParent(_effectCanvas, false);
+            var rt = go.AddComponent<RectTransform>();
+            var img = go.AddComponent<Image>();
+            img.sprite = TileClearEffect.GetCircleSpriteStatic();
+            img.raycastTarget = false;
+            return go;
+        }
+
+        private GameObject GetShockwaveObject()
+        {
+            if (_shockwavePool.Count > 0)
+            {
+                var go = _shockwavePool.Dequeue();
+                go.SetActive(true);
+                return go;
+            }
+            return CreateShockwaveObject();
+        }
+
+        private void ReleaseShockwaveObject(GameObject go)
+        {
+            if (go == null) return;
+            go.SetActive(false);
+            var rt = go.GetComponent<RectTransform>();
+            var img = go.GetComponent<Image>();
+            if (rt != null)
+            {
+                rt.localScale = Vector3.one;
+                rt.sizeDelta = new Vector2(30f, 30f);
+            }
+            if (img != null) img.color = Color.white;
+            _shockwavePool.Enqueue(go);
+        }
+
+        // ========== Coordinate Conversion ==========
+        private Vector2 WorldToUI(Vector3 worldPos)
+        {
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                _effectCanvas,
+                RectTransformUtility.WorldToScreenPoint(UICamera, worldPos),
+                UICamera,
+                out Vector2 uiPos);
+            return uiPos;
+        }
+
+        public void RefreshItemUI()
+        {
+            _bombNumberText.text = DataManager.Instance.BombCount.ToString();
+            _lightningNumberText.text = DataManager.Instance.LightningCount.ToString();
+            _potionNumberText.text = DataManager.Instance.PotionCount.ToString();
+
+            // Buttons always clickable (for ad panel when count = 0)
+            _bombButton.interactable = true;
+            _lightningButton.interactable = true;
+            _potionButton.interactable = true;
+        }
+
+        // ========== Bomb ==========
+        private void TryUseBomb()
+        {
+            if (!GameFlowController.Instance.CanAcceptInput) return;
+
+            if (DataManager.Instance.BombCount > 0)
+            {
+                ExecuteBomb();
+                return;
+            }
+
+            // No bomb, show ad panel
+            if (adRewardPanel != null)
+            {
+                adRewardPanel.Show("Bomb", () =>
+                {
+                    DataManager.Instance.BombCount += 10;
+                    RefreshItemUI();
+                    // 不自动执行，让用户下次点击时使用
+                });
+            }
+        }
+
+        public void ExecuteBomb()
+        {
+            if (DataManager.Instance.BombCount <= 0) return;
+
+            AudioManager.Instance?.PlayItem();
+            GameFlowController.Instance.SetState(GameState.Swapping);
+            DataManager.Instance.BombCount--;
+            RefreshItemUI();
+
+            int bombCount = Random.Range(3, 7);
+            var allClearedTiles = new List<Vector2Int>();
+            int finishedBombs = 0;
+
+            for (int i = 0; i < bombCount; i++)
+            {
+                int r = Random.Range(0, _boardView.Rows);
+                int c = Random.Range(0, _boardView.Cols);
+                Vector2 uiTarget = WorldToUI(_boardView.GridToWorld(r, c));
+
+                GameObject fx = Instantiate(_bombIconPrefab, _effectCanvas);
+                RectTransform fxRt = fx.GetComponent<RectTransform>();
+                fxRt.anchoredPosition = new Vector2(uiTarget.x, 1050f);
+                fxRt.localScale = Vector3.one * 1.5f;
+
+                StartCoroutine(ParticleTailCoroutine(fxRt, new Color(0.98f, 0.15f, 0.15f), 0.06f));
+
+                int capturedR = r, capturedC = c;
+
+                var flySeq = DOTween.Sequence();
+                flySeq.Append(fxRt.DOAnchorPos(uiTarget, 0.85f).SetEase(Ease.InQuad));
+                flySeq.Join(fxRt.DOScale(1.2f, 0.85f));
+
+                flySeq.OnComplete(() =>
+                {
+                    var explodeSeq = DOTween.Sequence();
+                    explodeSeq.Append(fxRt.DOScale(1.8f, 0.15f).SetEase(Ease.OutBack));
+
+                    Image bombImg = fx.GetComponent<Image>();
+                    if (bombImg != null)
+                    {
+                        var flashSeq = DOTween.Sequence();
+                        for (int f = 0; f < 8; f++)
+                        {
+                            bool red = f % 2 == 0;
+                            flashSeq.Append(bombImg.DOColor(red ? Color.red : Color.white, 0.04f));
+                            flashSeq.Join(fxRt.DOScale(red ? 2.2f : 1.6f, 0.04f));
+                        }
+                        explodeSeq.Append(flashSeq);
+                    }
+
+                    explodeSeq.AppendInterval(0.05f);
+                    explodeSeq.OnComplete(() =>
+                    {
+                        AudioManager.Instance?.PlayExplosion();
+                        Color bombColor = new Color(0.98f, 0.15f, 0.15f);
+                        SpawnCubeParticleInternal(uiTarget, bombColor, true, 12);
+                        SpawnShockwave(uiTarget, bombColor, 300f);
+
+                        _boardView.transform.DOShakePosition(0.5f, 35f, 18);
+
+                        for (int cr = capturedR - 1; cr <= capturedR + 1; cr++)
+                            for (int cc = capturedC - 1; cc <= capturedC + 1; cc++)
+                            {
+                                if (cr >= 0 && cr < _boardView.Rows && cc >= 0 && cc < _boardView.Cols)
+                                {
+                                    var pos = new Vector2Int(cr, cc);
+                                    if (!allClearedTiles.Contains(pos))
+                                    {
+                                        _boardView.ClearTileAtDirectly(cr, cc);
+                                        allClearedTiles.Add(pos);
+                                    }
+                                }
+                            }
+
+                        Destroy(fx);
+                        finishedBombs++;
+                        if (finishedBombs >= bombCount)
+                            OnTilesDestroyed?.Invoke(allClearedTiles);
+                    });
+                });
+            }
+        }
+
+        // ========== Lightning ==========
+        private void TryUseLightning()
+        {
+            if (!GameFlowController.Instance.CanAcceptInput) return;
+
+            if (DataManager.Instance.LightningCount > 0)
+            {
+                ExecuteLightning();
+                return;
+            }
+
+            if (adRewardPanel != null)
+            {
+                adRewardPanel.Show("Lightning", () =>
+                {
+                    DataManager.Instance.LightningCount += 10;
+                    RefreshItemUI();
+                });
+            }
+        }
+
+        public void ExecuteLightning()
+        {
+            if (DataManager.Instance.LightningCount <= 0) return;
+
+            AudioManager.Instance?.PlayItem();
+            GameFlowController.Instance.SetState(GameState.Swapping);
+            DataManager.Instance.LightningCount--;
+            RefreshItemUI();
+
+            TileType targetType = (TileType)Random.Range(0, 4);
+            List<TileView> views = _boardView.GetAllViewsOfType(targetType);
+
+            if (views.Count == 0)
+            {
+                OnTilesDestroyed?.Invoke(new List<Vector2Int>());
+                return;
+            }
+
+            Vector3 boardTopWorld = _boardView.GridToWorld(_boardView.Rows - 1, _boardView.Cols / 2);
+            Vector2 boardTopUI = WorldToUI(boardTopWorld);
+            boardTopUI.y += 150f;
+
+            GameObject lightningFx = Instantiate(_lightningIconPrefab, _effectCanvas);
+            RectTransform ltRt = lightningFx.GetComponent<RectTransform>();
+            ltRt.anchoredPosition = new Vector2(boardTopUI.x, 1050f);
+            ltRt.localScale = Vector3.one;
+
+            Color arcColor = new Color(1.0f, 0.95f, 0.1f);
+
+            var enterSeq = DOTween.Sequence();
+            enterSeq.Append(ltRt.DOAnchorPos(boardTopUI, 0.35f).SetEase(Ease.OutQuad));
+            enterSeq.Join(ltRt.DOScale(2.5f, 0.35f));
+
+            enterSeq.OnComplete(() =>
+            {
+                ltRt.DOShakePosition(0.4f, 15f, 20);
+
+                bool charging = true;
+                StartCoroutine(LightningParticleEmitter(ltRt, () => charging, 6));
+
+                DOVirtual.DelayedCall(0.4f, () =>
+                {
+                    charging = false;
+
+                    var positions = new List<Vector2Int>();
+                    var strikeSeq = DOTween.Sequence();
+                    float delay = 0f;
+
+                    foreach (var v in views)
+                    {
+                        var capturedView = v;
+                        Vector2 targetUI = WorldToUI(_boardView.GridToWorld(v.Data.Row, v.Data.Col));
+                        float capturedDelay = delay;
+
+                        strikeSeq.InsertCallback(capturedDelay, () =>
+                        {
+                            AudioManager.Instance?.PlayLightningStrike();
+                            Vector2 mid1 = Vector2.Lerp(boardTopUI, targetUI, 0.33f) + new Vector2(Random.Range(-50f, 50f), Random.Range(-30f, 30f));
+                            Vector2 mid2 = Vector2.Lerp(boardTopUI, targetUI, 0.66f) + new Vector2(Random.Range(-50f, 50f), Random.Range(-30f, 30f));
+                            SpawnUILine(boardTopUI, mid1, arcColor, 0.25f, 10f, 16f);
+                            SpawnUILine(mid1, mid2, arcColor, 0.25f, 10f, 16f);
+                            SpawnUILine(mid2, targetUI, arcColor, 0.25f, 10f, 16f);
+                            SpawnCubeParticleInternal(targetUI, arcColor, false, 6);
+                            SpawnShockwave(targetUI, arcColor, 80f);
+                        });
+
+                        strikeSeq.Insert(capturedDelay + 0.1f, capturedView.transform.DOScale(1.3f, 0.07f));
+                        strikeSeq.Insert(capturedDelay + 0.17f, capturedView.transform.DOScale(0f, 0.1f));
+
+                        positions.Add(new Vector2Int(v.Data.Row, v.Data.Col));
+                        delay += 0.12f;
+                    }
+
+                    strikeSeq.OnComplete(() =>
+                    {
+                        ltRt.DOScale(0f, 0.2f).OnComplete(() =>
+                        {
+                            Destroy(lightningFx);
+                            foreach (var p in positions)
+                                _boardView.ClearTileAtDirectly(p.x, p.y);
+                            OnTilesDestroyed?.Invoke(positions);
+                        });
+                    });
+                });
+            });
+        }
+
+        // ========== Potion ==========
+        private void TryUsePotion()
+        {
+            if (!GameFlowController.Instance.CanAcceptInput) return;
+
+            if (DataManager.Instance.PotionCount > 0)
+            {
+                ExecutePotion();
+                return;
+            }
+
+            if (adRewardPanel != null)
+            {
+                adRewardPanel.Show("Potion", () =>
+                {
+                    DataManager.Instance.PotionCount += 10;
+                    RefreshItemUI();
+                });
+            }
+        }
+
+        public void ExecutePotion()
+        {
+            if (DataManager.Instance.PotionCount <= 0) return;
+
+            AudioManager.Instance?.PlayItem();
+            GameFlowController.Instance.SetState(GameState.Swapping);
+            DataManager.Instance.PotionCount--;
+            RefreshItemUI();
+
+            int r = Random.Range(0, _boardView.Rows);
+            int c = Random.Range(0, _boardView.Cols);
+            Vector2 uiTarget = WorldToUI(_boardView.GridToWorld(r, c));
+
+            GameObject fx = Instantiate(_potionIconPrefab, _effectCanvas);
+            RectTransform fxRt = fx.GetComponent<RectTransform>();
+            fxRt.anchoredPosition = new Vector2(uiTarget.x - 60f, 1050f);
+            fxRt.localScale = Vector3.one * 1.5f;
+
+            Color acidColor = new Color(0.15f, 0.98f, 0.25f);
+            StartCoroutine(ParticleTailCoroutine(fxRt, acidColor, 0.06f));
+
+            int capturedR = r, capturedC = c;
+
+            var flySeq = DOTween.Sequence();
+            flySeq.Append(fxRt.DOAnchorPos(uiTarget, 0.85f).SetEase(Ease.InCubic));
+            flySeq.Join(fxRt.DOScale(1.2f, 0.85f));
+            flySeq.Join(fxRt.DORotate(new Vector3(0, 0, 450), 0.85f, RotateMode.FastBeyond360));
+
+            flySeq.OnComplete(() =>
+            {
+                var breakSeq = DOTween.Sequence();
+                breakSeq.Append(fxRt.DOAnchorPosY(uiTarget.y + 40f, 0.12f).SetEase(Ease.OutQuad));
+                breakSeq.Append(fxRt.DOAnchorPosY(uiTarget.y, 0.1f).SetEase(Ease.InQuad));
+                breakSeq.Join(fxRt.DOScale(1.6f, 0.12f));
+
+                breakSeq.AppendCallback(() =>
+                {
+                    AudioManager.Instance?.PlayPotionBreak();
+                    SpawnCubeParticleInternal(uiTarget, acidColor, true, 15);
+                    SpawnShockwave(uiTarget, acidColor, 180f);
+                    _boardView.transform.DOShakePosition(0.4f, 25f, 15);
+                    Destroy(fx);
+                });
+
+                breakSeq.AppendInterval(0.1f);
+                breakSeq.OnComplete(() =>
+                {
+                    var clearedTiles = new List<Vector2Int>();
+
+                    var rowTiles = new List<(Vector2Int pos, Vector2 ui)>();
+                    var colTiles = new List<(Vector2Int pos, Vector2 ui)>();
+
+                    for (int cc = 0; cc < _boardView.Cols; cc++)
+                        rowTiles.Add((new Vector2Int(capturedR, cc), WorldToUI(_boardView.GridToWorld(capturedR, cc))));
+
+                    for (int cr = 0; cr < _boardView.Rows; cr++)
+                    {
+                        if (cr == capturedR) continue;
+                        colTiles.Add((new Vector2Int(cr, capturedC), WorldToUI(_boardView.GridToWorld(cr, capturedC))));
+                    }
+
+                    var rowSeq = DOTween.Sequence();
+                    foreach (var (pos, uiPos) in rowTiles)
+                    {
+                        var capturedPos = pos;
+                        float dist = Mathf.Abs(uiPos.x - uiTarget.x);
+                        float t = dist / 600f * 0.3f;
+                        rowSeq.InsertCallback(t, () =>
+                        {
+                            Color transColor = new Color(acidColor.r, acidColor.g, acidColor.b, 0.4f);
+                            SpawnUILine(uiTarget, uiPos, transColor, 0.35f, 35f, 60f);
+                            SpawnCubeParticleInternal(uiPos, acidColor, false, 2);
+                            _boardView.ClearTileAtDirectly(capturedPos.x, capturedPos.y);
+                            clearedTiles.Add(capturedPos);
+                        });
+                    }
+
+                    var colSeq = DOTween.Sequence();
+                    colSeq.AppendInterval(0.05f);
+                    foreach (var (pos, uiPos) in colTiles)
+                    {
+                        var capturedPos = pos;
+                        float dist = Mathf.Abs(uiPos.y - uiTarget.y);
+                        float t = dist / 800f * 0.3f;
+                        colSeq.InsertCallback(t, () =>
+                        {
+                            Color transColor = new Color(acidColor.r, acidColor.g, acidColor.b, 0.4f);
+                            SpawnUILine(uiTarget, uiPos, transColor, 0.35f, 35f, 60f);
+                            SpawnCubeParticleInternal(uiPos, acidColor, false, 2);
+                            _boardView.ClearTileAtDirectly(capturedPos.x, capturedPos.y);
+                            if (!clearedTiles.Contains(capturedPos))
+                                clearedTiles.Add(capturedPos);
+                        });
+                    }
+
+                    DOVirtual.DelayedCall(0.45f, () => OnTilesDestroyed?.Invoke(clearedTiles));
+                });
+            });
+        }
+
+        // ========== Internal Effect Methods ==========
+        private IEnumerator LightningParticleEmitter(RectTransform lightningRt, System.Func<bool> checkCondition, int particleCount = 6)
+        {
+            while (checkCondition())
+            {
+                if (lightningRt == null) yield break;
+                SpawnCubeParticleInternal(lightningRt.anchoredPosition, new Color(1.0f, 0.95f, 0.1f), true, particleCount);
+                yield return new WaitForSeconds(0.04f);
+            }
+        }
+
+        private IEnumerator ParticleTailCoroutine(RectTransform propRt, Color particleColor, float interval = 0.06f)
+        {
+            while (propRt != null)
+            {
+                SpawnCubeParticleInternal(propRt.anchoredPosition, particleColor, false, 1);
+                yield return new WaitForSeconds(interval);
+            }
+        }
+
+        private void SpawnCubeParticleInternal(Vector2 uiCenter, Color particleColor, bool isExplosion, int baseCount = 12)
+        {
+            int spawnCount = isExplosion ? (int)(baseCount * Random.Range(1.2f, 1.6f)) : baseCount;
+
+            for (int i = 0; i < spawnCount; i++)
+            {
+                var (go, img, rt) = GetParticle();
+
+                rt.anchoredPosition = uiCenter;
+                float size = isExplosion ? Random.Range(20f, 35f) : Random.Range(15f, 25f);
+                rt.sizeDelta = new Vector2(size, size);
+                rt.localScale = Vector3.one;
+                rt.localRotation = Quaternion.identity;
+                img.color = particleColor;
+
+                Vector2 targetPos;
+                float duration;
+
+                if (isExplosion)
+                {
+                    float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+                    float dist = Random.Range(120f, 280f);
+                    targetPos = uiCenter + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * dist;
+                    duration = Random.Range(0.4f, 0.65f);
+                }
+                else
+                {
+                    float angle = Random.Range(-25f, 25f) * Mathf.Deg2Rad;
+                    float xOffset = Mathf.Sin(angle) * Random.Range(35f, 70f);
+                    float yOffset = Mathf.Cos(angle) * Random.Range(80f, 150f);
+                    rt.anchoredPosition += new Vector2(Random.Range(-20f, 20f), 15f);
+                    targetPos = rt.anchoredPosition + new Vector2(xOffset, yOffset);
+                    duration = Random.Range(0.2f, 0.4f);
+                }
+
+                float spin = Random.Range(360f, 720f) * (Random.value > 0.5f ? 1 : -1);
+                var capturedGo = go;
+                var capturedImg = img;
+                var capturedRt = rt;
+
+                rt.DOKill();
+
+                var seq = DOTween.Sequence();
+                seq.Join(rt.DOAnchorPos(targetPos, duration).SetEase(isExplosion ? Ease.OutCubic : Ease.OutQuad));
+                seq.Join(rt.DORotate(new Vector3(0, 0, spin), duration, RotateMode.FastBeyond360));
+                seq.Join(rt.DOScale(0f, duration * 0.7f).SetDelay(duration * 0.3f).SetEase(Ease.InQuad));
+                seq.Join(img.DOColor(new Color(particleColor.r, particleColor.g, particleColor.b, 0f), duration).SetEase(Ease.InQuad));
+                seq.OnComplete(() => ReleaseParticle(capturedGo, capturedImg, capturedRt));
+            }
+        }
+
+        private void SpawnUILine(Vector2 start, Vector2 end, Color color, float duration, float minWidth = 4f, float maxWidth = 8f)
+        {
+            var go = GetLineObject();
+            var rt = go.GetComponent<RectTransform>();
+            var img = go.GetComponent<Image>();
+
+            Vector2 dir = end - start;
+            float length = dir.magnitude;
+            float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+
+            rt.anchoredPosition = start + dir * 0.5f;
+            rt.sizeDelta = new Vector2(length, Random.Range(minWidth, maxWidth));
+            rt.localRotation = Quaternion.Euler(0, 0, angle);
+            img.color = color;
+
+            var seq = DOTween.Sequence();
+            seq.AppendInterval(duration * 0.3f);
+            seq.Append(img.DOColor(new Color(color.r, color.g, color.b, 0f), duration * 0.7f));
+            seq.Join(rt.DOScaleX(0f, duration * 0.7f).SetEase(Ease.InQuad));
+            seq.OnComplete(() => ReleaseLineObject(go));
+        }
+
+        private void SpawnShockwave(Vector2 center, Color color, float maxSize = 400f)
+        {
+            var go = GetShockwaveObject();
+            var rt = go.GetComponent<RectTransform>();
+            var img = go.GetComponent<Image>();
+
+            img.sprite = TileClearEffect.GetCircleSpriteStatic();
+            img.color = new Color(color.r, color.g, color.b, 0.75f);
+            rt.anchoredPosition = center;
+            rt.sizeDelta = new Vector2(30f, 30f);
+            rt.localScale = Vector3.one;
+
+            var seq = DOTween.Sequence();
+            seq.Join(rt.DOSizeDelta(new Vector2(maxSize, maxSize), 0.4f).SetEase(Ease.OutQuad));
+            seq.Join(img.DOColor(new Color(color.r, color.g, color.b, 0f), 0.4f).SetEase(Ease.OutQuad));
+            seq.OnComplete(() => ReleaseShockwaveObject(go));
+        }
+    }
+}
+```
+
+`Systems\ItemManager.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: fe1ea72769f980d4e9337d8f720384fa
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\LevelSystem.cs`:
+
+```cs
+using System;
+using Match3.Core;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    public class LevelSystem : MonoBehaviour
+    {
+        public static LevelSystem Instance { get; private set; }
+        public LevelConfig Config { get; private set; }
+        public int MovesRemaining { get; private set; }
+        public int TargetScore { get; private set; }
+        public event Action<int> OnMovesChanged;
+        public event Action OnWin;
+        public event Action OnLose;
+
+        private LevelConfig _config;
+        private GameFlowController _flow;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(LevelConfig config, GameFlowController flow)
+        {
+            Config = config;
+            _config = config;
+            _flow = flow;
+
+            // 🔥【补正】确保每次切换新关卡时，这些核心数值被成功刷新
+            MovesRemaining = config.MaxMoves;
+            TargetScore = config.TargetScore;
+
+            // 触发一下事件，让 UI 刷新显示新关卡的初始步数
+            OnMovesChanged?.Invoke(MovesRemaining);
+        }
+
+        public void ConsumeMove()
+        {
+            MovesRemaining = Mathf.Max(0, MovesRemaining - 1);
+            OnMovesChanged?.Invoke(MovesRemaining);
+        }
+
+        public void CheckConditions()
+        {
+            bool won = ScoreSystem.Instance.HasReachedTarget(_config.TargetScore);
+
+            if (won)
+            {
+                AudioManager.Instance?.PlayWin();
+                _flow.SetState(GameState.GameOver);
+                OnWin?.Invoke();
+                return;
+            }
+
+            if (MovesRemaining <= 0)
+            {
+                AudioManager.Instance?.PlayLose();
+                _flow.SetState(GameState.GameOver);
+                OnLose?.Invoke();
+            }
+        }
+    }
+}
+
+```
+
+`Systems\LevelSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 653a25cce616fc14b81c1aa094208283
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\MatchChecker.cs`:
+
+```cs
+using System.Collections.Generic;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    public class MatchChecker
+    {
+        private readonly GridSystem _grid;
+        private static readonly HashSet<Vector2Int> _matchesBuffer = new HashSet<Vector2Int>();
+
+        public MatchChecker(GridSystem grid)
+        {
+            _grid = grid;
+        }
+
+        public bool HasAnyMatch() => FindAllMatches().Count > 0;
+
+        public bool WouldSwapMatch(int r1, int c1, int r2, int c2)
+        {
+            _grid.Swap(r1, c1, r2, c2);
+            bool result = HasMatchAround(r1, c1) || HasMatchAround(r2, c2);
+            _grid.Swap(r1, c1, r2, c2);
+            return result;
+        }
+
+        /// <summary>检测某个格子是否存在三消（基于当前棋盘）。</summary>
+        public bool HasMatchAround(int row, int col)
+        {
+            var tile = _grid.Get(row, col);
+            if (tile == null) return false;
+            TileType type = tile.Type;
+
+            int hCount = 1;
+            for (int dc = 1; dc <= 2; dc++)
+            {
+                if (!MatchesType(row, col + dc, type)) break;
+                hCount++;
+            }
+            for (int dc = 1; dc <= 2; dc++)
+            {
+                if (!MatchesType(row, col - dc, type)) break;
+                hCount++;
+            }
+            if (hCount >= 3) return true;
+
+            int vCount = 1;
+            for (int dr = 1; dr <= 2; dr++)
+            {
+                if (!MatchesType(row + dr, col, type)) break;
+                vCount++;
+            }
+            for (int dr = 1; dr <= 2; dr++)
+            {
+                if (!MatchesType(row - dr, col, type)) break;
+                vCount++;
+            }
+            return vCount >= 3;
+        }
+
+        private bool MatchesType(int row, int col, TileType type)
+        {
+            if (!_grid.InBounds(row, col)) return false;
+            if (_grid.IsBlocked(row, col)) return false;
+            var tile = _grid.Get(row, col);
+            return tile != null && tile.Type == type && tile.State != TileState.Empty;
+        }
+
+        public HashSet<Vector2Int> FindAllMatches()
+        {
+            _matchesBuffer.Clear();
+
+            // 横向
+            for (int r = 0; r < _grid.Rows; r++)
+            {
+                for (int c = 0; c <= _grid.Cols - 3; c++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    var tile = _grid.Get(r, c);
+                    if (tile == null || tile.State == TileState.Empty) continue;
+
+                    int len = 1;
+                    while (c + len < _grid.Cols &&
+                           !_grid.IsBlocked(r, c + len) &&
+                           _grid.Get(r, c + len)?.Type == tile.Type &&
+                           _grid.Get(r, c + len)?.State != TileState.Empty)
+                        len++;
+
+                    if (len >= 3)
+                    {
+                        for (int i = 0; i < len; i++)
+                            _matchesBuffer.Add(new Vector2Int(r, c + i));
+                        c += len - 1;
+                    }
+                }
+            }
+
+            // 纵向
+            for (int c = 0; c < _grid.Cols; c++)
+            {
+                for (int r = 0; r <= _grid.Rows - 3; r++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    var tile = _grid.Get(r, c);
+                    if (tile == null || tile.State == TileState.Empty) continue;
+
+                    int len = 1;
+                    while (r + len < _grid.Rows &&
+                           !_grid.IsBlocked(r + len, c) &&
+                           _grid.Get(r + len, c)?.Type == tile.Type &&
+                           _grid.Get(r + len, c)?.State != TileState.Empty)
+                        len++;
+
+                    if (len >= 3)
+                    {
+                        for (int i = 0; i < len; i++)
+                            _matchesBuffer.Add(new Vector2Int(r + i, c));
+                        r += len - 1;
+                    }
+                }
+            }
+
+            return _matchesBuffer;
+        }
+    }
+}
+```
+
+`Systems\MatchChecker.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 71865561e96f3d6448072ab75241a3e3
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\ScoreSystem.cs`:
+
+```cs
+using System;
+using UnityEngine;
+using Match3.Data;
+
+namespace Match3.Systems
+{
+    public class ScoreSystem : MonoBehaviour
+    {
+        public static ScoreSystem Instance { get; private set; }
+
+        public int CurrentScore { get; private set; }
+        public event Action<int> OnScoreChanged;
+
+        private LevelConfig _config;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(LevelConfig config)
+        {
+            _config = config;
+            CurrentScore = 0;
+        }
+
+        /// <summary>
+        /// cascadeLevel 0 = first match (no bonus), 1+ = combo.
+        /// </summary>
+        public void AddScore(int tileCount, int cascadeLevel)
+        {
+            float multiplier = 1f + cascadeLevel * _config.ComboMultiplierStep;
+            int gain = Mathf.RoundToInt(tileCount * _config.BaseScorePerTile * multiplier);
+            CurrentScore += gain;
+
+
+            OnScoreChanged?.Invoke(CurrentScore);
+        }
+
+        public bool HasReachedTarget(int target) => CurrentScore >= target;
+    }
+}
+
+```
+
+`Systems\ScoreSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: d00d652b0d7e32e4ea5c819dae81a32b
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\SpawnSystem.cs`:
+
+```cs
+using System.Collections;
+using System.Collections.Generic;
+using Match3.Data;
+using UnityEngine;
+using DG.Tweening;
+
+namespace Match3.Systems
+{
+    public class SpawnSystem : MonoBehaviour
+    {
+        public static SpawnSystem Instance { get; private set; }
+
+        private GridSystem _grid;
+        private BoardView _boardView;
+        private MatchChecker _matchChecker; // 新增依赖
+        private int _typeCount;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(GridSystem grid, BoardView boardView, int tileTypeCount)
+        {
+            _grid = grid;
+            _boardView = boardView;
+            _typeCount = tileTypeCount;
+            _matchChecker = new MatchChecker(_grid); // 创建临时检查器，或从外部传入
+        }
+
+        // 重新设置 MatchChecker（由于 GridSystem 可能重建）
+        public void SetMatchChecker(MatchChecker checker)
+        {
+            _matchChecker = checker;
+        }
+
+        private TileType GetSafeRandomType(int row, int col)
+        {
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                var type = (TileType)Random.Range(0, _typeCount);
+                if (!WouldMatch(row, col, type))
+                    return type;
+            }
+            return (TileType)Random.Range(0, _typeCount);
+        }
+
+        private bool WouldMatch(int row, int col, TileType type)
+        {
+            // 复用 MatchChecker 的逻辑
+            var original = _grid.Get(row, col);
+            _grid.Set(row, col, new TileData(type, row, col));
+            bool result = _matchChecker.HasMatchAround(row, col);
+            _grid.Set(row, col, original);
+            return result;
+        }
+
+        public void FillBoard()
+        {
+            for (int r = 0; r < _grid.Rows; r++)
+            {
+                for (int c = 0; c < _grid.Cols; c++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    var type = GetSafeRandomType(r, c);
+                    var data = new TileData(type, r, c);
+                    _grid.Set(r, c, data);
+                    _boardView.SpawnView(data);
+                }
+            }
+        }
+
+        public IEnumerator SpawnMissing()
+        {
+            var newTiles = new List<TileData>();
+            for (int c = 0; c < _grid.Cols; c++)
+            {
+                for (int r = 0; r < _grid.Rows; r++)
+                {
+                    if (_grid.IsBlocked(r, c)) continue;
+                    if (_grid.IsEmpty(r, c))
+                    {
+                        var type = GetSafeRandomType(r, c);
+                        var data = new TileData(type, r, c);
+                        _grid.Set(r, c, data);
+                        newTiles.Add(data);
+                    }
+                }
+            }
+            if (newTiles.Count > 0)
+            {
+                var tween = _boardView.AnimateSpawn(newTiles);
+                yield return tween.WaitForCompletion();
+            }
+        }
+    }
+}
+```
+
+`Systems\SpawnSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 9c1cd8a14f7fd3f498947f5765da4cc5
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`Systems\SwapSystem.cs`:
+
+```cs
+using System;
+using System.Collections;
+using DG.Tweening;
+using Match3.Core;
+using Match3.Data;
+using UnityEngine;
+
+namespace Match3.Systems
+{
+    /// <summary>
+    /// Performs a swap between two adjacent tiles.
+    /// Validates adjacency and match-result; reverts on failure.
+    /// </summary>
+    public class SwapSystem : MonoBehaviour
+    {
+        public static SwapSystem Instance { get; private set; }
+
+        private GridSystem _grid;
+        private BoardView _boardView;
+        private MatchChecker _matchChecker;
+        private GameFlowController _flow;
+
+        public event Action OnSwapSuccess;
+        public event Action OnSwapFailed;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+        }
+
+        public void Initialize(GridSystem grid, BoardView boardView, MatchChecker checker, GameFlowController flow)
+        {
+            _grid = grid;
+            _boardView = boardView;
+            _matchChecker = checker;
+            _flow = flow;
+        }
+
+        public bool AreAdjacent(int r1, int c1, int r2, int c2)
+        {
+            return (Mathf.Abs(r1 - r2) + Mathf.Abs(c1 - c2)) == 1;
+        }
+
+        /// <summary>Entry point from InputController.</summary>
+        public void TrySwap(int r1, int c1, int r2, int c2)
+        {
+            // 目标格是屏蔽格直接忽略，不播任何动画
+            if (!GridSystem.Instance.InBounds(r2, c2) || GridSystem.Instance.IsBlocked(r2, c2))
+            {
+                OnSwapFailed?.Invoke();
+                return;
+            }
+
+            if (!AreAdjacent(r1, c1, r2, c2))
+            {
+                OnSwapFailed?.Invoke();
+                return;
+            }
+
+            if (!_matchChecker.WouldSwapMatch(r1, c1, r2, c2))
+            {
+                StartCoroutine(AnimateFailedSwap(r1, c1, r2, c2));
+                return;
+            }
+
+            StartCoroutine(PerformSwap(r1, c1, r2, c2));
+        }
+
+        private IEnumerator PerformSwap(int r1, int c1, int r2, int c2)
+        {
+            _flow.SetState(GameState.Swapping);
+
+            // Update data
+            _grid.Swap(r1, c1, r2, c2);
+            AudioManager.Instance?.PlaySwap();
+            // Animate
+            var tween = _boardView.AnimateSwap(r1, c1, r2, c2);
+            yield return tween.WaitForCompletion();
+
+            OnSwapSuccess?.Invoke();
+        }
+
+        private IEnumerator AnimateFailedSwap(int r1, int c1, int r2, int c2)
+        {
+            _flow.SetState(GameState.Swapping);
+
+            // Quick swap out
+            var tweenOut = _boardView.AnimateSwap(r1, c1, r2, c2, 0.15f);
+            yield return tweenOut.WaitForCompletion();
+
+            // Revert data (no-op because data wasn't swapped)
+            // Quick swap back
+            var tweenBack = _boardView.AnimateSwap(r2, c2, r1, c1, 0.15f);
+            yield return tweenBack.WaitForCompletion();
+
+            OnSwapFailed?.Invoke();
+            _flow.SetState(GameState.Idle);
+        }
+
+    }
+}
+
+```
+
+`Systems\SwapSystem.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 6137d4b692d22bc49acefc6ca6547ed5
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`UI.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 5341f84759016a44f87c24ca1d96c117
+folderAsset: yes
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`UI\AdRewardPanel.cs`:
+
+```cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using System;
+
+public class AdRewardPanel : MonoBehaviour
+{
+    [Header("UI Components")]
+    [SerializeField] private GameObject popupPanel;
+    [SerializeField] private TextMeshProUGUI titleText;
+    [SerializeField] private TextMeshProUGUI messageText;
+    [SerializeField] private Button watchButton;
+    [SerializeField] private Button cancelButton;
+
+    private Action onWatchComplete;
+
+    private void Awake()
+    {
+        if (popupPanel != null)
+            popupPanel.SetActive(false);
+
+        if (watchButton != null)
+            watchButton.onClick.AddListener(OnWatchButtonClick);
+        if (cancelButton != null)
+            cancelButton.onClick.AddListener(OnCancelButtonClick);
+    }
+
+    public void Show(string itemType, Action onComplete)
+    {
+        onWatchComplete = onComplete;
+
+        // 修改这里：使用 GetItemName 将 itemType 转换成中文
+        if (messageText != null)
+            messageText.text = $"观看广告获得 10 个{GetItemName(itemType)}？";
+        if (titleText != null)
+            titleText.text = "道具不足";
+
+        if (popupPanel != null)
+            popupPanel.SetActive(true);
+        else
+            gameObject.SetActive(true);
+    }
+
+    // 给 Cancel 按钮绑定的方法
+    public void OnCancelButtonClick()
+    {
+        AudioManager.Instance?.ButtonClick();
+        Hide();
+    }
+
+    public void Hide()
+    {
+        if (popupPanel != null)
+            popupPanel.SetActive(false);
+        else
+            gameObject.SetActive(false);
+
+        onWatchComplete = null;
+    }
+
+    private void OnWatchButtonClick()
+    {
+        AudioManager.Instance?.ButtonClick();
+        PlayRewardedVideo();
+    }
+
+    private void PlayRewardedVideo()
+    {
+        GrantReward();
+        return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // WeChat Mini Game environment
+        WeChatWASM.WX.CreateRewardedVideoAd(new WeChatWASM.WXCreateRewardedVideoAdParam
+        {
+            adUnitId = "YOUR_AD_UNIT_ID",
+            multiton = false
+        }).Show();
+        // Note: You need to listen to ad close event to call GrantReward()
+#else
+        // Editor test environment
+        SimulateAdReward();
+#endif
+    }
+
+    private void SimulateAdReward()
+    {
+        Invoke(nameof(DelayedReward), 0.5f);
+    }
+
+    private void DelayedReward()
+    {
+        var callback = onWatchComplete;
+        Hide();
+        callback?.Invoke();
+    }
+
+    public void GrantReward()
+    {
+        var callback = onWatchComplete;
+        Hide();
+        callback?.Invoke();
+    }
+
+    private string GetItemName(string itemType)
+    {
+        switch (itemType)
+        {
+            case "Bomb": return "炸弹";
+            case "Lightning": return "闪电";
+            case "Potion": return "药水";
+            default: return "道具";
+        }
+    }
+}
+```
+
+`UI\AdRewardPanel.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: bb43f976e3b7fb3479a53ae5487f7fba
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`UI\HUDController.cs`:
+
+```cs
+using Match3.Systems;
+using TMPro;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+namespace Match3.UI
+{
+    public class HUDController : MonoBehaviour
+    {
+        public static HUDController Instance { get; private set; }
+
+        [Header("分数进度条")]
+        [SerializeField] private Slider _scoreSlider;
+        [SerializeField] private TextMeshProUGUI _scoreText;
+
+        [Header("HUD 星星")]
+        [SerializeField] private GameObject _star1On;
+        [SerializeField] private GameObject _star2On;
+        [SerializeField] private GameObject _star3On;
+
+        [Header("步数")]
+        [SerializeField] private TextMeshProUGUI _movesText;
+
+        [Header("暂停按钮")]
+        [SerializeField] private Button _stopButton;
+
+        [Header("StopPanel")]
+        [SerializeField] private GameObject _stopPanel;
+        [SerializeField] private Button _stopRetryButton;
+        [SerializeField] private Button _quitButton;
+        [SerializeField] private Slider _sfxSlider;
+        [SerializeField] private Slider _bgmSlider;
+
+        [Header("ResultPanel")]
+        [SerializeField] private GameObject _resultPanel;
+        [SerializeField] private TextMeshProUGUI _resultTitleText;
+        [SerializeField] private TextMeshProUGUI _resultScoreText;
+        [SerializeField] private GameObject _resultStar1On;
+        [SerializeField] private GameObject _resultStar2On;
+        [SerializeField] private GameObject _resultStar3On;
+        [SerializeField] private Button _resultRetryButton;
+        [SerializeField] private Button _nextButton;
+
+        private int _targetScore;
+        // 星星状态缓存
+        private bool _star1Active, _star2Active, _star3Active;
+        private bool _resultStar1Active, _resultStar2Active, _resultStar3Active;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+
+            _stopPanel.SetActive(false);
+            _resultPanel.SetActive(false);
+
+            _stopButton.onClick.AddListener(OpenStopPanel);
+            _stopRetryButton.onClick.AddListener(RetryGame);
+            _quitButton.onClick.AddListener(OnQuitClicked);
+            _sfxSlider.onValueChanged.AddListener(OnSfxChanged);
+            _bgmSlider.onValueChanged.AddListener(OnBgmChanged);
+            _resultRetryButton.onClick.AddListener(RetryGame);
+            _nextButton.onClick.AddListener(OnNextClicked);
+        }
+
+        private void Start()
+        {
+            ScoreSystem.Instance.OnScoreChanged += UpdateScore;
+            LevelSystem.Instance.OnMovesChanged += UpdateMoves;
+            RefreshHUD();
+        }
+
+        private void OnDestroy()
+        {
+            if (ScoreSystem.Instance != null)
+                ScoreSystem.Instance.OnScoreChanged -= UpdateScore;
+            if (LevelSystem.Instance != null)
+                LevelSystem.Instance.OnMovesChanged -= UpdateMoves;
+        }
+
+        public void RefreshHUD()
+        {
+            _resultPanel.SetActive(false);
+            _stopPanel.SetActive(false);
+            _targetScore = LevelSystem.Instance.Config.TargetScore;
+            _scoreSlider.minValue = 0;
+            _scoreSlider.maxValue = _targetScore;
+            UpdateScore(0);
+            UpdateMoves(LevelSystem.Instance.MovesRemaining);
+            // 重置星星缓存
+            _star1Active = _star2Active = _star3Active = false;
+            _resultStar1Active = _resultStar2Active = _resultStar3Active = false;
+        }
+
+        private void UpdateScore(int score)
+        {
+            _scoreSlider.value = Mathf.Min(score, _targetScore);
+            _scoreText.text = $"{score}";
+
+            float ratio = (float)score / _targetScore;
+            SetStar(_star1On, ratio >= 0.2f, ref _star1Active);
+            SetStar(_star2On, ratio >= 0.5f, ref _star2Active);
+            SetStar(_star3On, ratio >= 0.8f, ref _star3Active);
+        }
+
+        private void UpdateMoves(int moves)
+        {
+            _movesText.text = $"{moves}";
+        }
+
+        private void SetStar(GameObject starOn, bool on, ref bool cache)
+        {
+            if (starOn == null) return;
+            if (cache == on) return;
+            cache = on;
+            starOn.SetActive(on);
+        }
+
+        private void OpenStopPanel()
+        {
+            AudioManager.Instance?.ButtonClick(); // 添加按钮音效
+            bool isOpen = _stopPanel.activeSelf;
+            _stopPanel.SetActive(!isOpen);
+            Time.timeScale = isOpen ? 1f : 0f;
+        }
+
+        private void OnQuitClicked()
+        {
+            AudioManager.Instance?.ButtonClick(); // 添加按钮音效
+            Time.timeScale = 1f;
+            SceneManager.LoadScene("MainMenu");
+        }
+
+        public void ShowResult(bool won)
+        {
+            _resultPanel.SetActive(true);
+            _resultTitleText.text = won ? "通关" : "失败";
+            _resultScoreText.text = $"{ScoreSystem.Instance.CurrentScore}";
+
+            // 互斥显示：胜利显示下一关，失败显示重试
+            _nextButton.gameObject.SetActive(won);
+            _resultRetryButton.gameObject.SetActive(!won);
+
+            float ratio = (float)ScoreSystem.Instance.CurrentScore / _targetScore;
+            SetStar(_resultStar1On, ratio >= 0.2f, ref _resultStar1Active);
+            SetStar(_resultStar2On, ratio >= 0.5f, ref _resultStar2Active);
+            SetStar(_resultStar3On, ratio >= 0.8f, ref _resultStar3Active);
+        }
+
+        private void OnNextClicked()
+        {
+            AudioManager.Instance?.ButtonClick(); // 添加按钮音效
+            _resultPanel.SetActive(false);
+            Time.timeScale = 1f;
+            GameManager.Instance?.EnterNextLevel();
+        }
+
+        private void RetryGame()
+        {
+            AudioManager.Instance?.ButtonClick(); // 添加按钮音效
+            Time.timeScale = 1f;
+            _stopPanel.SetActive(false);
+            _resultPanel.SetActive(false);
+            GameManager.Instance?.RestartCurrentLevel();
+        }
+
+        private void OnSfxChanged(float value)
+        {
+            AudioManager.Instance?.SetSFXVolume(value);
+        }
+
+        private void OnBgmChanged(float value)
+        {
+            AudioManager.Instance?.SetBGMVolume(value);
+        }
+    }
+}
+```
+
+`UI\HUDController.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: 0f7e711d94fc6824d8417184bee162c5
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```
+
+`UI\MenuController.cs`:
+
+```cs
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+using TMPro;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+using WeChatWASM;
+#endif
+
+namespace Match3.Systems
+{
+    public class MenuController : MonoBehaviour
+    {
+        [Header("按钮")]
+        [SerializeField] private Button newGameButton;
+        [SerializeField] private Button continueGameButton;
+        [SerializeField] private Button quitGameButton;
+
+        [Header("道具格子数据 (Number)")]
+        [SerializeField] private TMP_Text bombNumberText;
+        [SerializeField] private TMP_Text lightningNumberText;
+        [SerializeField] private TMP_Text potionNumberText;
+
+        [Header("当前关卡")]
+        [SerializeField] private TMP_Text currentLevelText;
+
+        [Header("场景名称")]
+        [SerializeField] private string gameSceneName = "GameScene";
+
+        private void Start()
+        {
+            // 只保留带音效的监听（一个按钮一个监听）
+            newGameButton.onClick.AddListener(() => { AudioManager.Instance?.ButtonClick(); NewGame(); });
+            continueGameButton.onClick.AddListener(() => { AudioManager.Instance?.ButtonClick(); ContinueGame(); });
+            quitGameButton.onClick.AddListener(() => { AudioManager.Instance?.ButtonClick(); QuitGame(); });
+
+            RefreshData();
+        }
+
+        private void NewGame()
+        {
+            DataManager.Instance.StartNewGame();
+
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+            {
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+            }
+
+            SceneManager.LoadScene(gameSceneName);
+        }
+
+        private void ContinueGame()
+        {
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+            {
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+            }
+
+            SceneManager.LoadScene(gameSceneName);
+        }
+
+        private void QuitGame()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // 微信小游戏环境：调用微信退出API
+    WX.ExitMiniProgram(new ExitMiniProgramOption
+    {
+        success = (res) =>
+        {
+            Debug.Log("[Menu] 游戏退出成功");
+        },
+        fail = (err) =>
+        {
+            Debug.LogError($"[Menu] 游戏退出失败: {err.errMsg}");
+        }
+    });
+#else
+            // 编辑器或其他平台：使用 Application.Quit
+            Application.Quit();
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#endif
+#endif
+        }
+
+        private void RefreshData()
+        {
+            bombNumberText.text = DataManager.Instance.BombCount.ToString();
+            lightningNumberText.text = DataManager.Instance.LightningCount.ToString();
+            potionNumberText.text = DataManager.Instance.PotionCount.ToString();
+            currentLevelText.text = "关卡:" + DataManager.Instance.CurrentLevel;
+        }
+    }
+}
+```
+
+`UI\MenuController.cs.meta`:
+
+```meta
+fileFormatVersion: 2
+guid: e0c85b9fedbf7644aaa376dfd35ca069
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+
+```

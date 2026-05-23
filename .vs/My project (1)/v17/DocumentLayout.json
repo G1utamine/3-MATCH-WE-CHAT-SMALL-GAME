@@ -1,0 +1,88 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|c:\\users\\xiejun\\documents\\project\\unityproject\\my project (1)\\assets\\scripts\\ui\\adrewardpanel.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|solutionrelative:assets\\scripts\\ui\\adrewardpanel.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\assets\\scripts\\systems\\itemmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|solutionrelative:assets\\scripts\\systems\\itemmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|c:\\users\\xiejun\\documents\\project\\unityproject\\my project (1)\\assets\\scripts\\ui\\hudcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|solutionrelative:assets\\scripts\\ui\\hudcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|c:\\users\\xiejun\\documents\\project\\unityproject\\my project (1)\\assets\\scripts\\ui\\menucontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E1CE1FEE-67BE-6533-73AA-CC578BE80DCD}|Assembly-CSharp.csproj|solutionrelative:assets\\scripts\\ui\\menucontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "AdRewardPanel.cs",
+              "DocumentMoniker": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\AdRewardPanel.cs",
+              "RelativeDocumentMoniker": "Assets\\Scripts\\UI\\AdRewardPanel.cs",
+              "ToolTip": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\AdRewardPanel.cs",
+              "RelativeToolTip": "Assets\\Scripts\\UI\\AdRewardPanel.cs",
+              "ViewState": "AgIAAEIAAAAAAAAAAAA7wFYAAAAsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-19T08:29:20.543Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ItemManager.cs",
+              "DocumentMoniker": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\Systems\\ItemManager.cs",
+              "RelativeDocumentMoniker": "Assets\\Scripts\\Systems\\ItemManager.cs",
+              "ToolTip": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\Systems\\ItemManager.cs",
+              "RelativeToolTip": "Assets\\Scripts\\Systems\\ItemManager.cs",
+              "ViewState": "AgIAAJECAAAAAAAAAAAuwJECAAA1AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-19T06:45:23.463Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "HUDController.cs",
+              "DocumentMoniker": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\HUDController.cs",
+              "RelativeDocumentMoniker": "Assets\\Scripts\\UI\\HUDController.cs",
+              "ToolTip": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\HUDController.cs",
+              "RelativeToolTip": "Assets\\Scripts\\UI\\HUDController.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAIkAAAA0AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-19T08:27:49.424Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "MenuController.cs",
+              "DocumentMoniker": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\MenuController.cs",
+              "RelativeDocumentMoniker": "Assets\\Scripts\\UI\\MenuController.cs",
+              "ToolTip": "C:\\Users\\XieJun\\Documents\\Project\\UnityProject\\My project (1)\\Assets\\Scripts\\UI\\MenuController.cs",
+              "RelativeToolTip": "Assets\\Scripts\\UI\\MenuController.cs",
+              "ViewState": "AgIAAEIAAAAAAAAAAAAowFcAAAApAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-19T08:19:39.813Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
